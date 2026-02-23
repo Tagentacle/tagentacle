@@ -1,15 +1,45 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
+use clap::{Parser, Subcommand};
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use std::process::Stdio;
 use std::sync::Arc;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::process::Command;
 use tokio::sync::{mpsc, Mutex};
 use tokio_util::codec::{Framed, LinesCodec};
+use uuid::Uuid;
 
-/// Tagentacle 核心协议消息结构 (最小集/MVP)
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Parser)]
+#[command(name = "tagentacle")]
+#[command(about = "Tagentacle: ROS for the AI Era", long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Starts the local Tagentacle message bus daemon
+    Daemon {
+        #[arg(short, long, default_value = "127.0.0.1:19999")]
+        addr: String,
+    },
+    /// Bridges an external MCP Server (stdio) to the Tagentacle bus
+    Bridge {
+        /// Command to start the MCP server (e.g., 'npx -y @modelcontextprotocol/server-sqlite')
+        #[arg(long)]
+        mcp: String,
+        /// Optional node ID for this bridge (default: pseudo-random)
+        #[arg(short, long)]
+        node_id: Option<String>,
+    },
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(tag = "op")]
 #[serde(rename_all = "snake_case")]
 enum Action {
@@ -38,25 +68,68 @@ enum Action {
         payload: Value,
         caller_id: String,
     },
+    Message {
+        topic: String,
+        sender: String,
+        payload: Value,
+    },
 }
 
-/// 内部路由表结构
+// --- Daemon Logic ---
+
 struct Router {
-    // topic -> Vec<(node_id, tx)>
+    // Topic subscriptions: topic -> Vec<(node_id, tx)>
     subscriptions: HashMap<String, Vec<(String, mpsc::UnboundedSender<Value>)>>,
-    // service -> (node_id, tx)
+    // Service registry: service_name -> (node_id, tx)
     services: HashMap<String, (String, mpsc::UnboundedSender<Value>)>,
-    // node_id -> tx (用于全双工路由)
+    // Node registry: node_id -> tx (used for direct routing of Service Responses and Callbacks)
     nodes: HashMap<String, mpsc::UnboundedSender<Value>>,
+    // TODO: Global Parameter Server (ROS-like /param/get and /param/set)
+    // parameters: HashMap<String, Value>,
 }
+
+// TODO: Built-in Command Tasks for Tagentacle CLI:
+// 1. tagentacle node list: List all connected nodes.
+// 2. tagentacle topic echo <topic>: CLI tool to peek into bus traffic (similar to ros2 topic echo).
+// 3. tagentacle service call <srv> <json_args>: CLI tool to test services.
+// 4. tagentacle doctor: Health check (daemon status, node connectivity).
+
+// TODO: Implement Node Lifecycle Tracking (Heartbeats / Liveliness)
+// Tagentacle nodes should be monitored so that if a node crashes, 
+// the bus can cleanup its services and notify subscribers.
+
+// TODO: Built-in 'launch' Command Logic
+// This should parse a launch.yaml file containing:
+// - List of nodes to run
+// - Environment variables (e.g., TAGENTACLE_DAEMON_URL)
+// - Remapping rules (e.g., map /camera/image to /sys/camera/image)
+// - Logging redirection (stdout -> log file/bus topic).
 
 type SharedRouter = Arc<Mutex<Router>>;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let addr = "127.0.0.1:19999";
-    let listener = TcpListener::bind(addr).await?;
-    println!("Tagentacle Core Daemon (Rust) listening on: {}", addr);
+    let cli = Cli::parse();
+
+    match cli.command {
+        Some(Commands::Daemon { addr }) => {
+            run_daemon(addr).await?;
+        }
+        Some(Commands::Bridge { mcp, node_id }) => {
+            run_bridge(mcp, node_id).await?;
+        }
+        None => {
+            // Default to daemon for backward compatibility
+            run_daemon("127.0.0.1:19999".to_string()).await?;
+        }
+    }
+
+    Ok(())
+}
+
+async fn run_daemon(addr: String) -> Result<()> {
+    let listener = TcpListener::bind(&addr).await?;
+    println!("Tagentacle Daemon listening on: {}", addr);
 
     let router = Arc::new(Mutex::new(Router {
         subscriptions: HashMap::new(),
@@ -67,29 +140,22 @@ async fn main() -> Result<()> {
     loop {
         let (socket, _) = listener.accept().await?;
         let router = Arc::clone(&router);
-
         tokio::spawn(async move {
-            match handle_connection(socket, router).await {
-                Ok(_) => { /* 正常断开 */ }
-                Err(e) => eprintln!("Error handling connection: {}", e),
+            if let Err(e) = handle_daemon_connection(socket, router).await {
+                eprintln!("Daemon connection error: {}", e);
             }
         });
     }
 }
 
-async fn handle_connection(socket: TcpStream, router: SharedRouter) -> Result<()> {
+async fn handle_daemon_connection(socket: TcpStream, router: SharedRouter) -> Result<()> {
     let codec = LinesCodec::new();
     let mut framed = Framed::new(socket, codec);
-
-    // 为当前连接创建一个消息队列，用于推送订阅消息
     let (tx, mut rx) = mpsc::unbounded_channel::<Value>();
-    
-    // 跟踪本连接关联的节点 ID (MVP 模型暂为 1 Link -> 1 Node 映射)
     let mut current_node_id: Option<String> = None;
 
     loop {
         tokio::select! {
-            // 1. 监听来自此 Client 的 JSON 命令 (Raw TCP -> Framed Lines)
             line = framed.next() => {
                 match line {
                     Some(Ok(msg)) => {
@@ -100,97 +166,162 @@ async fn handle_connection(socket: TcpStream, router: SharedRouter) -> Result<()
                                 continue;
                             }
                         };
-
                         match action {
                             Action::Subscribe { topic, node_id } => {
-                                println!("Node '{}' subscribed to '{}'", node_id, topic);
                                 current_node_id = Some(node_id.clone());
-                                
                                 let mut r = router.lock().await;
                                 r.nodes.insert(node_id.clone(), tx.clone());
-                                let entry = r.subscriptions.entry(topic).or_insert_with(Vec::new);
-                                // 无论是否已订阅，加入 Sender
-                                entry.push((node_id, tx.clone()));
+                                r.subscriptions.entry(topic).or_default().push((node_id, tx.clone()));
                             }
                             Action::Publish { topic, sender, payload } => {
-                                // 转发逻辑 (Fan-out)
                                 let r = router.lock().await;
                                 if let Some(subs) = r.subscriptions.get(&topic) {
-                                    let push_msg = json!({
-                                        "op": "message",
-                                        "topic": topic,
-                                        "sender": sender,
-                                        "payload": payload
-                                    });
-                                    
-                                    for (_, sub_tx) in subs {
-                                        let _ = sub_tx.send(push_msg.clone());
-                                    }
+                                    let push = json!({"op": "message", "topic": topic, "sender": sender, "payload": payload});
+                                    for (_, sub_tx) in subs { let _ = sub_tx.send(push.clone()); }
                                 }
                             }
                             Action::AdvertiseService { service, node_id } => {
-                                println!("Node '{}' advertised service '{}'", node_id, service);
                                 current_node_id = Some(node_id.clone());
                                 let mut r = router.lock().await;
                                 r.nodes.insert(node_id.clone(), tx.clone());
                                 r.services.insert(service, (node_id, tx.clone()));
                             }
                             Action::CallService { service, request_id, payload, caller_id } => {
-                                println!("Service call: {} from {} (id: {})", service, caller_id, request_id);
                                 let mut r = router.lock().await;
                                 r.nodes.insert(caller_id.clone(), tx.clone());
-                                if let Some((_target_node, service_tx)) = r.services.get(&service) {
-                                    let push_msg = json!({
-                                        "op": "call_service",
-                                        "service": service,
-                                        "request_id": request_id,
-                                        "payload": payload,
-                                        "caller_id": caller_id
-                                    });
-                                    let _ = service_tx.send(push_msg);
-                                } else {
-                                    eprintln!("Service '{}' not found!", service);
+                                if let Some((_, srv_tx)) = r.services.get(&service) {
+                                    let _ = srv_tx.send(json!({"op": "call_service", "service": service, "request_id": request_id, "payload": payload, "caller_id": caller_id}));
                                 }
                             }
                             Action::ServiceResponse { service, request_id, payload, caller_id } => {
-                                println!("Service response: {} to {} (id: {})", service, caller_id, request_id);
                                 let r = router.lock().await;
                                 if let Some(caller_tx) = r.nodes.get(&caller_id) {
-                                    let push_msg = json!({
-                                        "op": "service_response",
-                                        "service": service,
-                                        "request_id": request_id,
-                                        "payload": payload,
-                                        "caller_id": caller_id
-                                    });
-                                    let _ = caller_tx.send(push_msg);
-                                } else {
-                                    eprintln!("Caller '{}' not found in routing table!", caller_id);
+                                    let _ = caller_tx.send(json!({"op": "service_response", "service": service, "request_id": request_id, "payload": payload, "caller_id": caller_id}));
                                 }
                             }
+                            _ => {}
                         }
                     }
-                    _ => break, // EOF 或读取出错，退出 Loop 并后续清理
+                    _ => break,
                 }
             }
+            msg = rx.recv() => {
+                if let Some(msg) = msg {
+                    if let Ok(json_line) = serde_json::to_string(&msg) {
+                        let _ = framed.send(json_line).await;
+                    }
+                } else { break; }
+            }
+        }
+    }
+    if let Some(node_id) = current_node_id { println!("Node '{}' disconnected", node_id); }
+    Ok(())
+}
 
-            // 2. 监听需要推送给此 Client 的异步消息
-            msg_to_send = rx.recv() => {
-                if let Some(msg) = msg_to_send {
-                    let json_line = serde_json::to_string(&msg)?;
-                    framed.send(json_line).await?;
-                } else {
-                    break;
-                }
+// --- Bridge Logic ---
+
+async fn run_bridge(mcp_cmd: String, node_id_opt: Option<String>) -> Result<()> {
+    let node_id = node_id_opt.unwrap_or_else(|| format!("bridge_{}", &Uuid::new_v4().to_string()[..8]));
+    let rpc_service = format!("/mcp/{}/rpc", node_id);
+    let audit_topic = "/mcp/traffic";
+
+    println!("Starting Bridge Node: {}", node_id);
+    println!("MCP Command: {}", mcp_cmd);
+
+    // 1. Connect to Daemon
+    let stream = TcpStream::connect("127.0.0.1:19999").await
+        .context("Failed to connect to Tagentacle Daemon. Is it running?")?;
+    let mut framed = Framed::new(stream, LinesCodec::new());
+
+    // 2. Advertise Tunnel Service
+    let advertise = json!({
+        "op": "advertise_service",
+        "service": rpc_service,
+        "node_id": node_id
+    });
+    framed.send(advertise.to_string()).await?;
+
+    // 3. Start Subprocess
+    let mut child = if cfg!(target_os = "windows") {
+        Command::new("cmd").args(["/C", &mcp_cmd]).stdin(Stdio::piped()).stdout(Stdio::piped()).spawn()?
+    } else {
+        Command::new("sh").args(["-c", &mcp_cmd]).stdin(Stdio::piped()).stdout(Stdio::piped()).spawn()?
+    };
+
+    let mut child_stdin = child.stdin.take().unwrap();
+    let child_stdout = child.stdout.take().unwrap();
+    let mut child_reader = BufReader::new(child_stdout).lines();
+
+    println!("Bridge ready. Listening for Tagentacle calls on {}...", rpc_service);
+
+    // Track active requests to map responses back
+    // Mapping: JSON-RPC ID (from client req) -> (Service Request ID, Caller ID)
+    let mut pending_calls: HashMap<Value, (String, String)> = HashMap::new();
+
+    loop {
+        tokio::select! {
+            // A. From Tagentacle Bus -> To MCP Subprocess (stdin)
+            bus_msg = framed.next() => {
+                if let Some(Ok(line)) = bus_msg {
+                    let action: Action = serde_json::from_str(&line)?;
+                    if let Action::CallService { payload, request_id, caller_id, .. } = action {
+                        // Extract JSON-RPC ID to track it
+                        if let Some(mcp_id) = payload.get("id") {
+                            pending_calls.insert(mcp_id.clone(), (request_id, caller_id));
+                        }
+
+                        // Forward JSON-RPC payload to stdin
+                        let mcp_raw = serde_json::to_string(&payload)?;
+                        child_stdin.write_all(mcp_raw.as_bytes()).await?;
+                        child_stdin.write_all(b"\n").await?;
+                        child_stdin.flush().await?;
+                        
+                        // Mirrror to audit topic
+                        let audit = json!({
+                            "op": "publish", "topic": audit_topic, "sender": node_id,
+                            "payload": {"direction": "bus_to_mcp", "data": payload}
+                        });
+                        let _ = framed.send(audit.to_string()).await;
+                    }
+                } else { break; }
+            }
+
+            // B. From MCP Subprocess (stdout) -> To Tagentacle Bus (ServiceResponse / CallService)
+            mcp_line = child_reader.next_line() => {
+                if let Ok(Some(line)) = mcp_line {
+                    let mcp_val: Value = match serde_json::from_str(&line) {
+                        Ok(v) => v,
+                        Err(_) => continue,
+                    };
+                    
+                    // Mirroring
+                    let audit = json!({
+                        "op": "publish", "topic": audit_topic, "sender": node_id,
+                        "payload": {"direction": "mcp_to_bus", "data": mcp_val}
+                    });
+                    let _ = framed.send(audit.to_string()).await;
+
+                    // If it's a Response (has 'id')
+                    if let Some(mcp_id) = mcp_val.get("id") {
+                        if let Some((req_id, caller_id)) = pending_calls.remove(mcp_id) {
+                            let resp = json!({
+                                "op": "service_response",
+                                "service": rpc_service,
+                                "request_id": req_id,
+                                "payload": mcp_val,
+                                "caller_id": caller_id
+                            });
+                            let _ = framed.send(resp.to_string()).await;
+                        }
+                    } else if mcp_val.get("method").is_some() {
+                        // It's a Notification or Request from Server (Sampling)
+                        // TODO: Implement session-aware reverse routing
+                    }
+                } else { break; }
             }
         }
     }
 
-    // 清理逻辑 (MVP 简化: 遍历路由表移除断开的 Senders)
-    if let Some(node_id) = current_node_id {
-        println!("Node '{}' disconnected. Cleaning up subscriptions...", node_id);
-    }
-    
     Ok(())
 }
 
