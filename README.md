@@ -201,15 +201,33 @@ The Tagentacle Daemon listens on `TCP 19999` by default. All communication uses 
 
 The CLI provides the primary interface for developers:
 - `tagentacle daemon`: Starts the local TCP message bus.
-- `tagentacle run <pkg_name>`: Parses `tagentacle.toml`, sets up venv, and launches a Node.
-- `tagentacle launch <config.yaml>`: Orchestrates multiple Nodes from topology config.
-- `tagentacle topic list`: Lists all active Topics on the bus.
+- `tagentacle run --pkg <dir>`: Activates the package's `.venv` and launches its Node.
+- `tagentacle launch <config.toml>`: Orchestrates multiple Nodes from topology config, each with isolated venvs.
 - `tagentacle topic echo <topic>`: Subscribes and prints real-time messages.
-- `tagentacle service list`: Lists all registered Services.
 - `tagentacle service call <srv> <json>`: Tests a service from the command line.
 - `tagentacle bridge --mcp <cmd>`: Bridges an external MCP Server (stdio) to the bus.
-- `tagentacle setup/dep`: Environment management (venv creation, dependency installation).
+- `tagentacle setup dep --pkg <dir>`: Runs `uv sync` for a single package.
+- `tagentacle setup dep --all <workspace>`: Installs all packages and generates `install/` structure with `.venv` symlinks + `setup_env.bash`.
+- `tagentacle setup clean --workspace <dir>`: Removes the generated `install/` directory.
 - `tagentacle doctor`: Health check (daemon status, node connectivity).
+
+### Environment Management
+
+Every package is a **uv project** (`pyproject.toml` + `uv.lock`). No pip is used.
+
+```bash
+# Initialize the full workspace
+tagentacle setup dep --all .
+# → runs uv sync in each package
+# → creates install/src/<pkg>/.venv symlinks
+# → generates install/setup_env.bash
+
+# Source environment (adds all .venvs to PATH)
+source install/setup_env.bash
+
+# Clean up
+tagentacle setup clean --workspace .
+```
 
 ---
 
@@ -231,7 +249,8 @@ The CLI provides the primary interface for developers:
 ### Planned
 - [x] **MCP-Publish Bridge Node**: Built-in MCP Server that exposes `publish()` as an MCP Tool.
 - [x] **Bringup Configuration Center**: Config-driven topology orchestration with parameter injection.
-- [x] **CLI Expansion (partial)**: `topic echo`, `service call`, `doctor` implemented. `run`, `launch`, `topic list`, `service list`, `setup/dep` pending.
+- [x] **CLI Expansion**: `topic echo`, `service call`, `doctor`, `run`, `launch`, `setup dep`, `setup clean` implemented.
+- [x] **Environment Management**: uv-based per-package `.venv` isolation, workspace `install/` structure with symlinks.
 - [ ] **Node Lifecycle Tracking**: Heartbeat/liveliness monitoring in the Daemon.
 - [ ] **Interface Package**: Cross-node JSON Schema contract definition packages.
 - [ ] **Action Mode**: Long-running async tasks with progress feedback.
@@ -248,16 +267,14 @@ The CLI provides the primary interface for developers:
    cargo run -- daemon
    ```
 
-2. **Run a Node** (Python SDK):
-   ```python
-   from tagentacle_py import Node
-   import asyncio
+2. **Set up the workspace** (uv):
+   ```bash
+   cd tagentacle-py
+   tagentacle setup dep --all ..
+   # or manually: uv sync
+   ```
 
-   async def main():
-       node = Node("example_node")
-       await node.connect()
-       await node.publish("/hello", {"data": "world"})
-       await node.spin()
-
-   asyncio.run(main())
+3. **Run a Node** (Python SDK):
+   ```bash
+   tagentacle run --pkg examples/mcp_server_pkg
    ```
