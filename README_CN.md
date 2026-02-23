@@ -202,15 +202,33 @@ Tagentacle Daemon 默认监听 `TCP 19999` 端口。所有通信均为换行符�
 
 CLI 是开发者的主要交互入口：
 - `tagentacle daemon`：启动本地 TCP 消息总线。
-- `tagentacle run <pkg_name>`：解析 `tagentacle.toml`，创建虚拟环境，启动节点。
-- `tagentacle launch <config.yaml>`：根据拓扑配置并行启动多个节点。
-- `tagentacle topic list`：列出当前活跃的所有 Topic。
+- `tagentacle run --pkg <dir>`：激活包的 `.venv` 并启动其 Node。
+- `tagentacle launch <config.toml>`：根据拓扑配置编排多节点，每个节点独立 venv。
 - `tagentacle topic echo <topic>`：订阅并实时打印消息。
-- `tagentacle service list`：列出已注册的所有 Service。
 - `tagentacle service call <srv> <json>`：从命令行测试服务。
 - `tagentacle bridge --mcp <cmd>`：将外部 MCP Server (stdio) 桥接到总线。
-- `tagentacle setup/dep`：环境管理（创建 venv、安装依赖）。
+- `tagentacle setup dep --pkg <dir>`：对单个包执行 `uv sync`。
+- `tagentacle setup dep --all <workspace>`：扫描工作空间所有包并安装依赖，生成 `install/` 结构。
+- `tagentacle setup clean --workspace <dir>`：移除生成的 `install/` 目录。
 - `tagentacle doctor`：健康检查（守护进程状态、节点连通性）。
+
+### 环境管理
+
+每个包都是一个 **uv 项目**（`pyproject.toml` + `uv.lock`）。不使用 pip。
+
+```bash
+# 初始化整个工作空间
+tagentacle setup dep --all .
+# → 在每个包中执行 uv sync
+# → 创建 install/src/<pkg>/.venv 符号链接
+# → 生成 install/setup_env.bash
+
+# 加载环境（将所有 .venv 添加到 PATH）
+source install/setup_env.bash
+
+# 清理
+tagentacle setup clean --workspace .
+```
 
 ---
 
@@ -219,20 +237,20 @@ CLI 是开发者的主要交互入口：
 ### 已完成
 - [x] **Rust Daemon**：Topic Pub/Sub 和 Service Req/Res 消息路由。
 - [x] **Python SDK (Simple API)**：`Node` 类，含 `connect`、`publish`、`subscribe`、`service`、`call_service`、`spin`。
-- [x] **MCP Bridge (Rust)**：`tagentacle bridge --mcp` 命令，将 stdio MCP Server 隧道至总线。
-- [x] **示例**：`talker/listener` (Pub/Sub) 和 `service_server/service_client` (Service) 演示。
-
-### 进行中
-- [x] **修复编译**：`Cargo.toml` 添加缺失的 `clap` 和 `uuid` 依赖。
 - [x] **Python SDK 双层 API**：实现 `LifecycleNode`，含 `on_configure`/`on_activate`/`on_deactivate`/`on_shutdown`。
+- [x] **MCP Bridge (Rust)**：`tagentacle bridge --mcp` 命令，将 stdio MCP Server 隧道至总线。
 - [x] **MCP Transport 层**：在 `tagentacle-py` 中实现 `TagentacleClientTransport` 和 `TagentacleServerTransport`。
+- [x] **MCP-Publish 桥接器节点**：内置 MCP Server，将 `publish()` 暴露为 MCP Tool。
 - [x] **`tagentacle.toml` 规范**：定义并解析包清单格式。
-- [ ] **JSON Schema 校验**：Topic 级别 Schema 契约，实现确定性消息校验。
+- [x] **Bringup 配置中心**：配置驱动的拓扑编排与参数注入。
+- [x] **CLI 工具链**：`daemon`、`run`、`launch`、`topic echo`、`service call`、`doctor`、`bridge`、`setup dep`、`setup clean`。
+- [x] **环境管理**：基于 uv 的逐包 `.venv` 隔离，工作空间 `install/` 结构与符号链接。
+- [x] **秘钥管理**：`secrets.toml` 自动加载，Bringup 环境变量注入。
+- [x] **SDK 工具函数**：`load_pkg_toml`、`discover_packages`、`find_workspace_root`。
+- [x] **示例 Workspace**：`examples/src/` 包含 agent_pkg、mcp_server_pkg、bringup_pkg，均为独立 uv 项目。
 
 ### 计划中
-- [x] **MCP-Publish 桥接器节点**：内置 MCP Server，将 `publish()` 暴露为 MCP Tool。
-- [x] **Bringup 配置中心**：配置驱动的拓扑编排与参数注入。
-- [x] **CLI 扩展（部分）**：已实现 `topic echo`、`service call`、`doctor`。`run`、`launch`、`topic list`、`service list`、`setup/dep` 待实现。
+- [ ] **JSON Schema 校验**：Topic 级别 Schema 契约，实现确定性消息校验。
 - [ ] **节点生命周期追踪**：Daemon 侧心跳/存活监控。
 - [ ] **Interface Package**：跨节点 JSON Schema 契约定义包。
 - [ ] **Action 模式**：长程异步任务，支持进度反馈。
@@ -249,16 +267,14 @@ CLI 是开发者的主要交互入口：
    cargo run -- daemon
    ```
 
-2. **运行节点 (Python SDK)**:
-   ```python
-   from tagentacle_py import Node
-   import asyncio
+2. **初始化工作空间 (uv)**:
+   ```bash
+   cd tagentacle-py
+   tagentacle setup dep --all ..
+   # 或手动: uv sync
+   ```
 
-   async def main():
-       node = Node("example_node")
-       await node.connect()
-       await node.publish("/hello", {"data": "world"})
-       await node.spin()
-
-   asyncio.run(main())
+3. **运行节点**:
+   ```bash
+   tagentacle run --pkg examples/src/mcp_server_pkg
    ```

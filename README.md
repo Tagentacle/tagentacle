@@ -236,21 +236,20 @@ tagentacle setup clean --workspace .
 ### Completed
 - [x] **Rust Daemon**: Topic Pub/Sub and Service Req/Res message routing.
 - [x] **Python SDK (Simple API)**: `Node` class with `connect`, `publish`, `subscribe`, `service`, `call_service`, `spin`.
-- [x] **MCP Bridge (Rust)**: `tagentacle bridge --mcp` command tunneling stdio MCP servers through the bus.
-- [x] **Examples**: `talker/listener` (Pub/Sub) and `service_server/service_client` (Service) demos.
-
-### In Progress
-- [x] **Fix Build**: Add missing `clap` and `uuid` dependencies to `Cargo.toml`.
 - [x] **Python SDK Dual-Layer API**: `LifecycleNode` with `on_configure`/`on_activate`/`on_deactivate`/`on_shutdown`.
-- [x] **MCP Transport Layer**: Implement `TagentacleClientTransport` and `TagentacleServerTransport` in `tagentacle-py`.
+- [x] **MCP Bridge (Rust)**: `tagentacle bridge --mcp` command tunneling stdio MCP servers through the bus.
+- [x] **MCP Transport Layer**: `TagentacleClientTransport` and `TagentacleServerTransport` in `tagentacle-py`.
+- [x] **MCP-Publish Bridge Node**: Built-in MCP Server that exposes `publish()` as an MCP Tool.
 - [x] **`tagentacle.toml` Spec**: Define and parse package manifest format.
-- [ ] **JSON Schema Validation**: Topic-level schema contracts for deterministic message validation.
+- [x] **Bringup Configuration Center**: Config-driven topology orchestration with parameter injection.
+- [x] **CLI Toolchain**: `daemon`, `run`, `launch`, `topic echo`, `service call`, `doctor`, `bridge`, `setup dep`, `setup clean`.
+- [x] **Environment Management**: uv-based per-package `.venv` isolation, workspace `install/` structure with symlinks.
+- [x] **Secrets Management**: `secrets.toml` auto-loading, bringup environment variable injection.
+- [x] **SDK Utilities**: `load_pkg_toml`, `discover_packages`, `find_workspace_root`.
+- [x] **Example Workspace**: `examples/src/` with agent_pkg, mcp_server_pkg, bringup_pkg as independent uv projects.
 
 ### Planned
-- [x] **MCP-Publish Bridge Node**: Built-in MCP Server that exposes `publish()` as an MCP Tool.
-- [x] **Bringup Configuration Center**: Config-driven topology orchestration with parameter injection.
-- [x] **CLI Expansion**: `topic echo`, `service call`, `doctor`, `run`, `launch`, `setup dep`, `setup clean` implemented.
-- [x] **Environment Management**: uv-based per-package `.venv` isolation, workspace `install/` structure with symlinks.
+- [ ] **JSON Schema Validation**: Topic-level schema contracts for deterministic message validation.
 - [ ] **Node Lifecycle Tracking**: Heartbeat/liveliness monitoring in the Daemon.
 - [ ] **Interface Package**: Cross-node JSON Schema contract definition packages.
 - [ ] **Action Mode**: Long-running async tasks with progress feedback.

@@ -24,22 +24,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`tagentacle.toml` Package Manifest** (specification + examples):
   - Defined `[package]` (name, version, type, description, entry_point) and `[dependencies]` sections.
   - Created example manifests for `agent_pkg`, `mcp_server_pkg`, `bringup_pkg`.
-- **Bringup Configuration Center** (`examples/bringup_pkg/launch/`):
+- **Bringup Configuration Center** (`examples/src/bringup_pkg/launch/`):
   - `system_launch.toml` — TOML-based topology definition with `depends_on`, `startup_delay`, parameters.
   - `system_launch.py` — config-driven launcher using `tomllib`, topological ordering, env var injection.
 - **CLI Tools Expansion** (Rust Daemon):
   - `tagentacle topic echo <topic>` — subscribe and print messages from a topic.
   - `tagentacle service call <service> <payload>` — call a service and print the response.
   - `tagentacle doctor` — check daemon connectivity.
+  - `tagentacle run --pkg <path>` — run a single package node, auto-sourcing per-pkg `.venv`.
+  - `tagentacle launch <config.toml>` — multi-node topology launch from TOML config, per-node venv activation.
+  - `tagentacle setup dep --pkg <path>` / `--all` — uv-based dependency installation for single pkg or entire workspace.
+  - `tagentacle setup clean` — remove all `.venv` directories under the workspace.
+- **Environment Management** (Rust Daemon):
+  - Per-package `.venv` isolation via `uv sync`.
+  - Workspace `install/` directory generation with symlinks to all discovered packages.
+  - `setup_env.bash` auto-generation for `PATH` injection.
+  - `find_all_packages()` recursive workspace scanner, `generate_install_structure()`.
+- **Secrets Management** (`tagentacle-py`):
+  - `secrets.toml` auto-loading via `TAGENTACLE_SECRETS_FILE` environment variable.
+  - `_load_secrets_file()` and `_parse_toml_fallback()` in Node.
+  - Bringup launcher injects `TAGENTACLE_SECRETS_FILE` into child node environments.
+- **SDK Bringup Utilities** (`tagentacle-py`):
+  - `load_pkg_toml(pkg_dir)` — parse and return `tagentacle.toml` as dict.
+  - `discover_packages(workspace_root)` — recursively find all packages with `tagentacle.toml`.
+  - `find_workspace_root(start_path)` — locate workspace root by traversing parent directories.
 - **Examples**:
   - `mcp_server_pkg/server.py` — MCP weather server over bus transport.
   - Updated `agent_pkg/client.py` — MCP client using `tagentacle_client_transport`.
   - `mcp_seamless_demo.py` — end-to-end MCP-over-bus pipeline demo.
+  - All example packages converted to independent uv projects (`pyproject.toml` + `uv.lock`).
 
 ### Fixed
 - **Cargo.toml**: Added missing `clap` (with `derive` feature) and `uuid` (with `v4` feature) dependencies.
 
 ### Changed
+- **Workspace Restructure**: Moved example packages from `examples/` to `examples/src/` for cleaner separation.
+- **Build System**: Switched from pip to uv as sole Python package manager for all packages.
 - **Documentation Overhaul (NEW_ARCHITECTURE alignment)**:
   - Rewrote [README.md](README.md) (EN) and [README_CN.md](README_CN.md) (CN) to reflect the new architecture:
     - Core philosophy: "Everything is a Pkg" with 4 package types (Agent, Tool/Service, Interface, Bringup).
@@ -49,8 +69,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - MCP-Publish Bridge Node concept.
     - Bringup as configuration center with topology orchestration and parameter injection.
     - `tagentacle.toml` package manifest specification.
-    - Full CLI toolchain roadmap: `run`, `launch`, `topic`, `service`, `bridge`, `setup/dep`, `doctor`.
+    - Full CLI toolchain: `run`, `launch`, `topic`, `service`, `bridge`, `setup dep/clean`, `doctor`.
   - Added comprehensive Roadmap & Status section with categorized task tracking.
+  - Updated bilingual SDK READMEs with uv environment workflow and workspace documentation.
 
 ## [0.1.1] - 2026-02-22
 
