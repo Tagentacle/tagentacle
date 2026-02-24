@@ -1,8 +1,8 @@
-# Tagentacle：AI 时代的 ROS 🐙
+# Tagentacle：ROS for AI Agent 🐙
 
 [![GitHub](https://img.shields.io/badge/GitHub-Tagentacle-blue)](https://github.com/Tagentacle/tagentacle)
 
-**Tagentacle** 是一个去中心化、配置中心化、生产级可用的多智能体框架。它深度引入 **ROS 2** 的软件组织模式，结合现代 AI 生态（MCP 协议）与动态 Schema 技术，为大语言模型（LLM）多智能体协同提供工业级基础设施。
+**Tagentacle** 是一个去中心化、配置中心化、生产级可用的多智能体框架。它深度引入 **ROS 2**（Robot Operating System）的软件组织模式，结合现代 AI 生态（MCP 协议）与动态 Schema 技术，为大语言模型（LLM）多智能体协同提供工业级基础设施。
 
 > **Everything is a Pkg. Managed. Verifiable. Scalable.**
 
