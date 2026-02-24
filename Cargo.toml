@@ -1,7 +1,13 @@
 [package]
-name = "Tagentacle"
+name = "tagentacle"
 version = "0.1.0"
 edition = "2024"
+description = "Tagentacle: ROS for AI Agent — High-performance message bus daemon and CLI"
+license = "MIT"
+
+[[bin]]
+name = "tagentacle"
+path = "src/main.rs"
 
 [dependencies]
 tokio = { version = "1.0", features = ["full"] }

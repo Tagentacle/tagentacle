@@ -410,7 +410,7 @@ tagentacle setup clean --workspace .
 - [x] **Python SDK 双层 API**：实现 `LifecycleNode`，含 `on_configure`/`on_activate`/`on_deactivate`/`on_shutdown`。
 - [x] **MCP Bridge (Rust)**：`tagentacle bridge --mcp` 命令，将 stdio MCP Server 隧道至总线。
 - [x] **MCP Transport 层**：在 `tagentacle-py` 中实现 `TagentacleClientTransport` 和 `TagentacleServerTransport`。
-- [x] **Tagentacle MCP Server**：内置 MCP Server，暴露总线交互工具（`publish_to_topic`、`subscribe_topic`、`list_nodes`、`list_topics`、`list_services`、`call_bus_service`、`ping_daemon`）。
+- [x] **Tagentacle MCP Server**：内置 MCP Server，暴露总线交互工具（`publish_to_topic`、`subscribe_topic`、`list_nodes`、`list_topics`、`list_services`、`call_bus_service`、`ping_daemon`、`describe_topic_schema`）。
 - [x] **`tagentacle.toml` 规范**：定义并解析包清单格式。
 - [x] **Bringup 配置中心**：配置驱动的拓扑编排与参数注入。
 - [x] **CLI 工具链**：`daemon`、`run`、`launch`、`topic echo`、`service call`、`doctor`、`bridge`、`setup dep`、`setup clean`。
@@ -423,6 +423,7 @@ tagentacle setup clean --workspace .
 - [ ] **标准 Topic 与 Service**：Daemon 内置 `/tagentacle/log`、`/tagentacle/node_events`、`/tagentacle/diagnostics`、`/tagentacle/ping`、`/tagentacle/list_nodes` 等。
 - [ ] **SDK 日志集成**：通过 `get_logger()` 自动发布节点日志到 `/tagentacle/log`。
 - [ ] **JSON Schema 校验**：Topic 级别 Schema 契约，实现确定性消息校验。
+- [ ] **展平 Topic 工具 API**：SDK 提供 API，根据 Topic JSON Schema 定义自动生成展平参数的 MCP 工具（如注册了 `/chat/input` 的 Schema 后，自动生成 `publish_chat_input(text, sender)` 工具）。
 - [ ] **节点生命周期追踪**：通过 `/tagentacle/diagnostics` 实现 Daemon 侧心跳/存活监控。
 - [ ] **Interface Package**：跨节点 JSON Schema 契约定义包。
 - [ ] **Action 模式**：长程异步任务，支持进度反馈。
@@ -434,20 +435,38 @@ tagentacle setup clean --workspace .
 
 ## 🚀 快速开始
 
-1. **启动守护进程 (Rust Core)**:
+### 安装
+
+```bash
+# 从源码安装（编译并复制到 ~/.cargo/bin/）
+cd tagentacle
+cargo install --path .
+
+# 验证
+tagentacle --help
+
+# 卸载
+cargo uninstall tagentacle
+```
+
+> **提示**：确保 `~/.cargo/bin` 在你的 `PATH` 中（rustup 默认已添加）。
+
+### 快速上手
+
+以下命令均在**工作空间根目录**（包含 `tagentacle/` 和 `tagentacle-py/` 的目录）下运行：
+
+1. **启动守护进程**：
    ```bash
-   cd tagentacle
-   cargo run -- daemon
+   tagentacle daemon
+   # 或如未安装：cd tagentacle && cargo run -- daemon
    ```
 
-2. **初始化工作空间 (uv)**:
+2. **初始化工作空间** (uv)：
    ```bash
-   cd tagentacle-py
-   tagentacle setup dep --all ..
-   # 或手动: uv sync
+   tagentacle setup dep --all .
    ```
 
-3. **运行节点**:
+3. **运行节点**：
    ```bash
-   tagentacle run --pkg examples/src/mcp_server_pkg
+   tagentacle run --pkg tagentacle-py/example_ws/src/mcp_server_pkg
    ```

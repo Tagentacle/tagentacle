@@ -409,7 +409,7 @@ tagentacle setup clean --workspace .
 - [x] **Python SDK Dual-Layer API**: `LifecycleNode` with `on_configure`/`on_activate`/`on_deactivate`/`on_shutdown`.
 - [x] **MCP Bridge (Rust)**: `tagentacle bridge --mcp` command tunneling stdio MCP servers through the bus.
 - [x] **MCP Transport Layer**: `TagentacleClientTransport` and `TagentacleServerTransport` in `tagentacle-py`.
-- [x] **Tagentacle MCP Server**: Built-in MCP Server exposing bus interaction tools (`publish_to_topic`, `subscribe_topic`, `list_nodes`, `list_topics`, `list_services`, `call_bus_service`, `ping_daemon`).
+- [x] **Tagentacle MCP Server**: Built-in MCP Server exposing bus interaction tools (`publish_to_topic`, `subscribe_topic`, `list_nodes`, `list_topics`, `list_services`, `call_bus_service`, `ping_daemon`, `describe_topic_schema`).
 - [x] **`tagentacle.toml` Spec**: Define and parse package manifest format.
 - [x] **Bringup Configuration Center**: Config-driven topology orchestration with parameter injection.
 - [x] **CLI Toolchain**: `daemon`, `run`, `launch`, `topic echo`, `service call`, `doctor`, `bridge`, `setup dep`, `setup clean`.
@@ -422,6 +422,7 @@ tagentacle setup clean --workspace .
 - [ ] **Standard Topics & Services**: Daemon built-in `/tagentacle/log`, `/tagentacle/node_events`, `/tagentacle/diagnostics`, `/tagentacle/ping`, `/tagentacle/list_nodes`, etc.
 - [ ] **SDK Log Integration**: Auto-publish node logs to `/tagentacle/log` via `get_logger()`.
 - [ ] **JSON Schema Validation**: Topic-level schema contracts for deterministic message validation.
+- [ ] **Flattened Topic Tools API**: SDK API to auto-generate flattened MCP tools from Topic JSON Schema definitions (e.g., a registered `/chat/input` schema auto-generates a `publish_chat_input(text, sender)` tool with expanded parameters).
 - [ ] **Node Lifecycle Tracking**: Heartbeat/liveliness monitoring in the Daemon via `/tagentacle/diagnostics`.
 - [ ] **Interface Package**: Cross-node JSON Schema contract definition packages.
 - [ ] **Action Mode**: Long-running async tasks with progress feedback.
@@ -433,20 +434,38 @@ tagentacle setup clean --workspace .
 
 ## 🚀 Getting Started
 
-1. **Start the Daemon** (Rust Core):
+### Installation
+
+```bash
+# Install from source (compiles and copies to ~/.cargo/bin/)
+cd tagentacle
+cargo install --path .
+
+# Verify
+tagentacle --help
+
+# Uninstall
+cargo uninstall tagentacle
+```
+
+> **Note**: Ensure `~/.cargo/bin` is in your `PATH` (rustup adds it by default).
+
+### Quick Start
+
+All commands below are run from the **workspace root** (the directory containing both `tagentacle/` and `tagentacle-py/`):
+
+1. **Start the Daemon**:
    ```bash
-   cd tagentacle
-   cargo run -- daemon
+   tagentacle daemon
+   # Or, if not installed: cd tagentacle && cargo run -- daemon
    ```
 
 2. **Set up the workspace** (uv):
    ```bash
-   cd tagentacle-py
-   tagentacle setup dep --all ..
-   # or manually: uv sync
+   tagentacle setup dep --all .
    ```
 
 3. **Run a Node** (Python SDK):
    ```bash
-   tagentacle run --pkg examples/src/mcp_server_pkg
+   tagentacle run --pkg tagentacle-py/example_ws/src/mcp_server_pkg
    ```
