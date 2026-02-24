@@ -56,6 +56,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **Cargo.toml**: Added missing `clap` (with `derive` feature) and `uuid` (with `v4` feature) dependencies.
+- **Cargo.toml / Cargo.lock**: Lowercase package name (`Tagentacle` → `tagentacle`) for Cargo convention compliance.
+- **Quick start**: Updated instructions to use `example_ws` workspace directory; added `cargo install` step; assumed `tagentacle` in `PATH`.
+- **CLI**: Running `tagentacle` without a subcommand now prints full help text instead of blocking as a daemon; use `tagentacle daemon` to start the message bus.
 
 ### Changed
 - **Workspace Restructure**: Moved example packages from `examples/` to `examples/src/` for cleaner separation.
@@ -72,6 +75,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - Full CLI toolchain: `run`, `launch`, `topic`, `service`, `bridge`, `setup dep/clean`, `doctor`.
   - Added comprehensive Roadmap & Status section with categorized task tracking.
   - Updated bilingual SDK READMEs with uv environment workflow and workspace documentation.
+- **Branding**: Renamed project tagline to "ROS for AI Agent"; added ROS full name for context.
+- **Documentation**: Added Claude Code vs Tagentacle architectural comparison; added Standard Topics/Services specification; added Agent IO+Inference architecture design.
 
 ## [0.1.1] - 2026-02-22
 
