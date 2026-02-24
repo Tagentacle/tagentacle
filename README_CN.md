@@ -247,6 +247,111 @@ async with ClientSession(transport) as session:
 
 ---
 
+## 📜 标准 Topic 与 Service
+
+当 Daemon 启动时，会自动创建一组 `/tagentacle/` 命名空间下的**系统保留 Topic 和 Service** —— 类比 ROS 2 的 `/rosout`、`/parameter_events` 和节点内省服务。这些提供内置的可观测性、日志聚合和系统内省能力，无需用户侧任何配置。
+
+### 保留命名空间约定
+
+| 前缀 | 用途 | 管理者 |
+|---|---|---|
+| `/tagentacle/*` | **系统保留。** Daemon 与 SDK 核心功能 | 核心库 |
+| `/mcp/*` | MCP 协议相关（审计、RPC 隧道） | MCP Transport 层 / Bridge |
+
+用户自定义 Topic **不应**使用以上前缀。
+
+### 标准 Topic（Daemon 管理）
+
+| Topic | ROS 2 对应 | 说明 | 发布者 |
+|---|---|---|---|
+| `/tagentacle/log` | `/rosout` | 全局日志聚合。所有节点通过 SDK 自动发布日志；Daemon 也发布系统事件。 | SDK 节点（自动）+ Daemon |
+| `/tagentacle/node_events` | 生命周期事件 | 节点生命周期事件：上线、下线、状态转换。支撑 Dashboard 实时拓扑图。 | Daemon（自动）+ `LifecycleNode`（自动）|
+| `/tagentacle/diagnostics` | `/diagnostics` | 节点健康诊断：心跳、运行时长、消息计数、错误计数。 | SDK `Node.spin()`（定时）|
+| `/mcp/traffic` | _（无）_ | MCP JSON-RPC 审计流。所有 MCP 隧道流量的镜像，用于无感观测。**（已在 Bridge 中实现）** | Bridge / MCP Transport |
+
+### 标准 Service（Daemon 内置）
+
+Daemon 以 `_daemon_` 作为内部节点 ID，直接从 Router 内部状态提供以下内省 Service：
+
+| Service | ROS 2 对应 | 说明 |
+|---|---|---|
+| `/tagentacle/ping` | `ros2 doctor` | Daemon 健康检测。返回 `{status, uptime_s, version, node_count, topic_count}` |
+| `/tagentacle/list_nodes` | `ros2 node list` | 返回所有已连接节点：`{nodes: [{node_id, connected_at}]}` |
+| `/tagentacle/list_topics` | `ros2 topic list` | 返回所有活跃 Topic 及其订阅者：`{topics: [{name, subscribers}]}` |
+| `/tagentacle/list_services` | `ros2 service list` | 返回所有已注册 Service：`{services: [{name, provider}]}` |
+| `/tagentacle/get_node_info` | `ros2 node info` | 获取单个节点详情：`{node_id, subscriptions, services, connected_at}` |
+
+可以直接通过 CLI 测试：
+```bash
+tagentacle service call /tagentacle/ping '{}'
+tagentacle service call /tagentacle/list_nodes '{}'
+tagentacle topic echo /tagentacle/log
+tagentacle topic echo /tagentacle/node_events
+```
+
+### 日志消息格式 (`/tagentacle/log`)
+```json
+{
+  "level": "info",
+  "timestamp": "2026-02-24T12:00:00.000Z",
+  "node_id": "alice_agent",
+  "message": "Connected to OpenAI API successfully",
+  "file": "main.py",
+  "line": 42,
+  "function": "on_configure"
+}
+```
+
+### 节点事件格式 (`/tagentacle/node_events`)
+```json
+{
+  "event": "connected",
+  "node_id": "alice_agent",
+  "timestamp": "2026-02-24T12:00:00.000Z",
+  "state": "active",
+  "prev_state": "inactive"
+}
+```
+
+---
+
+## 🤖 Agent 架构：IO + Inference 分离
+
+Tagentacle 采用 **Agent Node**（上下文工程 + agentic loop）与 **Inference Node**（无状态 LLM 网关）的分离设计：
+
+### Agent Node = 完整的 Agentic Loop
+
+Agent Node 是一个独立 Pkg，在内部完成整个 agentic loop：
+- 订阅 Topic → 接收用户消息/事件通知
+- 管理 context window（消息队列、上下文工程）
+- 通过 Service RPC 调用 Inference Node 获取 completion
+- 解析 `tool_calls` → 通过 MCP Transport 执行工具 → 回填结果 → 再推理
+
+这个 loop 是一个紧耦合的顺序控制流（类似 ROS 2 的 nav2 导航栈），**不应**被拆分到多个 Node 中。
+
+### Inference Node = 无状态 LLM 网关
+
+一个独立的 Pkg（官方示例，位于 org 级别，**非**核心库组成部分），提供：
+- Service（如 `/inference/chat`），接受 OpenAI 兼容格式：`{model, messages, tools?, temperature?}`
+- 返回标准 completion：`{choices: [{message: {role, content, tool_calls?}}]}`
+- 多个 Agent Node 可并发调用同一个 Inference Node
+
+### 数据流
+```
+UI Node ──publish──▶ /chat/input ──▶ Agent Node (agentic loop)
+                                        │
+                                        ├─ call_service("/inference/chat") ──▶ Inference Node ──▶ OpenRouter/OpenAI
+                                        │                                           │
+                                        │◀── completion (with tool_calls) ◀─────────┘
+                                        │
+                                        ├─ MCP Transport ──▶ Tool Server Node
+                                        │◀── tool result ◀──┘
+                                        │
+                                        └─ publish ──▶ /chat/output ──▶ UI Node
+```
+
+---
+
 ## 📜 通信协议规范
 
 Tagentacle Daemon 默认监听 `TCP 19999` 端口。所有通信均为换行符分割的 JSON 字符串（JSON Lines）。
@@ -305,7 +410,7 @@ tagentacle setup clean --workspace .
 - [x] **Python SDK 双层 API**：实现 `LifecycleNode`，含 `on_configure`/`on_activate`/`on_deactivate`/`on_shutdown`。
 - [x] **MCP Bridge (Rust)**：`tagentacle bridge --mcp` 命令，将 stdio MCP Server 隧道至总线。
 - [x] **MCP Transport 层**：在 `tagentacle-py` 中实现 `TagentacleClientTransport` 和 `TagentacleServerTransport`。
-- [x] **MCP-Publish 桥接器节点**：内置 MCP Server，将 `publish()` 暴露为 MCP Tool。
+- [x] **Tagentacle MCP Server**：内置 MCP Server，暴露总线交互工具（`publish_to_topic`、`subscribe_topic`、`list_nodes`、`list_topics`、`list_services`、`call_bus_service`、`ping_daemon`）。
 - [x] **`tagentacle.toml` 规范**：定义并解析包清单格式。
 - [x] **Bringup 配置中心**：配置驱动的拓扑编排与参数注入。
 - [x] **CLI 工具链**：`daemon`、`run`、`launch`、`topic echo`、`service call`、`doctor`、`bridge`、`setup dep`、`setup clean`。
@@ -315,10 +420,13 @@ tagentacle setup clean --workspace .
 - [x] **示例 Workspace**：`examples/src/` 包含 agent_pkg、mcp_server_pkg、bringup_pkg，均为独立 uv 项目。
 
 ### 计划中
+- [ ] **标准 Topic 与 Service**：Daemon 内置 `/tagentacle/log`、`/tagentacle/node_events`、`/tagentacle/diagnostics`、`/tagentacle/ping`、`/tagentacle/list_nodes` 等。
+- [ ] **SDK 日志集成**：通过 `get_logger()` 自动发布节点日志到 `/tagentacle/log`。
 - [ ] **JSON Schema 校验**：Topic 级别 Schema 契约，实现确定性消息校验。
-- [ ] **节点生命周期追踪**：Daemon 侧心跳/存活监控。
+- [ ] **节点生命周期追踪**：通过 `/tagentacle/diagnostics` 实现 Daemon 侧心跳/存活监控。
 - [ ] **Interface Package**：跨节点 JSON Schema 契约定义包。
 - [ ] **Action 模式**：长程异步任务，支持进度反馈。
+- [ ] **Parameter Server**：全局参数存储，配合 `/tagentacle/parameter_events` 通知。
 - [ ] **vcstool + `.repos`**：多仓一键拉取与工作空间构建。
 - [ ] **Web Dashboard**：实时拓扑、消息流和节点状态可视化。
 

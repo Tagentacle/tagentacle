@@ -246,6 +246,111 @@ async with ClientSession(transport) as session:
 
 ---
 
+## 📜 Standard Topics & Services
+
+When the Daemon starts, it automatically creates a set of **system-reserved Topics and Services** under the `/tagentacle/` namespace — analogous to ROS 2's `/rosout`, `/parameter_events`, and node introspection services. These provide built-in observability, logging, and introspection without requiring any user-side setup.
+
+### Reserved Namespace Convention
+
+| Prefix | Purpose | Managed By |
+|---|---|---|
+| `/tagentacle/*` | **System reserved.** Daemon & SDK core functionality | Core library |
+| `/mcp/*` | MCP protocol (audit trail, RPC tunnels) | MCP Transport / Bridge |
+
+User-defined Topics should **not** use the above prefixes.
+
+### Standard Topics (Daemon-managed)
+
+| Topic | Analogy | Description | Published By |
+|---|---|---|---|
+| `/tagentacle/log` | ROS `/rosout` | Global log aggregation. All nodes auto-publish logs here via SDK; Daemon also publishes system events. | SDK Nodes (auto) + Daemon |
+| `/tagentacle/node_events` | ROS lifecycle events | Node lifecycle events: connected, disconnected, lifecycle state transitions. Powers real-time topology in dashboards. | Daemon (auto) + `LifecycleNode` (auto) |
+| `/tagentacle/diagnostics` | ROS `/diagnostics` | Node health reports: heartbeat, uptime, message counters, error counts.  | SDK `Node.spin()` (periodic) |
+| `/mcp/traffic` | _(none)_ | MCP JSON-RPC audit stream. All tunneled MCP traffic is mirrored here for non-intrusive observation. **(Already implemented in Bridge.)** | Bridge / MCP Transport |
+
+### Standard Services (Daemon built-in)
+
+The Daemon registers itself as the `_daemon_` node and provides these introspection Services directly from its internal Router state:
+
+| Service | Analogy | Description |
+|---|---|---|
+| `/tagentacle/ping` | `ros2 doctor` | Daemon health check. Returns `{status, uptime_s, version, node_count, topic_count}` |
+| `/tagentacle/list_nodes` | `ros2 node list` | Returns all connected nodes: `{nodes: [{node_id, connected_at}]}` |
+| `/tagentacle/list_topics` | `ros2 topic list` | Returns all active Topics and their subscribers: `{topics: [{name, subscribers}]}` |
+| `/tagentacle/list_services` | `ros2 service list` | Returns all registered Services: `{services: [{name, provider}]}` |
+| `/tagentacle/get_node_info` | `ros2 node info` | Returns details for a specific node: `{node_id, subscriptions, services, connected_at}` |
+
+These Services can be tested directly from the CLI:
+```bash
+tagentacle service call /tagentacle/ping '{}'
+tagentacle service call /tagentacle/list_nodes '{}'
+tagentacle topic echo /tagentacle/log
+tagentacle topic echo /tagentacle/node_events
+```
+
+### Log Message Schema (`/tagentacle/log`)
+```json
+{
+  "level": "info",
+  "timestamp": "2026-02-24T12:00:00.000Z",
+  "node_id": "alice_agent",
+  "message": "Connected to OpenAI API successfully",
+  "file": "main.py",
+  "line": 42,
+  "function": "on_configure"
+}
+```
+
+### Node Event Schema (`/tagentacle/node_events`)
+```json
+{
+  "event": "connected",
+  "node_id": "alice_agent",
+  "timestamp": "2026-02-24T12:00:00.000Z",
+  "state": "active",
+  "prev_state": "inactive"
+}
+```
+
+---
+
+## 🤖 Agent Architecture: IO + Inference Separation
+
+Tagentacle adopts a clean separation between **Agent Nodes** (context engineering + agentic loop) and **Inference Nodes** (stateless LLM gateway):
+
+### Agent Node = Complete Agentic Loop
+
+An Agent Node is a single Pkg that owns the entire agentic loop internally:
+- Subscribe to Topics → receive user messages / events
+- Manage the context window (message queue, context engineering)
+- Call Inference Node's Service for LLM completion
+- Parse `tool_calls` → execute tools via MCP Transport → backfill results → re-infer
+
+This loop is a tightly-coupled sequential control flow (like ROS 2's nav2 stack) and should **not** be split across multiple Nodes.
+
+### Inference Node = Stateless LLM Gateway
+
+A separate Pkg (official example at org level, **not** part of the core library) that provides:
+- A Service (e.g., `/inference/chat`) accepting OpenAI-compatible format: `{model, messages, tools?, temperature?}`
+- Returns standard completion: `{choices: [{message: {role, content, tool_calls?}}]}`
+- Multiple Agent Nodes can call the same Inference Node concurrently
+
+### Data Flow
+```
+UI Node ──publish──▶ /chat/input ──▶ Agent Node (agentic loop)
+                                        │
+                                        ├─ call_service("/inference/chat") ──▶ Inference Node ──▶ OpenRouter/OpenAI
+                                        │                                           │
+                                        │◀── completion (with tool_calls) ◀─────────┘
+                                        │
+                                        ├─ MCP Transport ──▶ Tool Server Node
+                                        │◀── tool result ◀──┘
+                                        │
+                                        └─ publish ──▶ /chat/output ──▶ UI Node
+```
+
+---
+
 ## 📜 Communication Protocol
 
 The Tagentacle Daemon listens on `TCP 19999` by default. All communication uses newline-delimited JSON (JSON Lines).
@@ -304,7 +409,7 @@ tagentacle setup clean --workspace .
 - [x] **Python SDK Dual-Layer API**: `LifecycleNode` with `on_configure`/`on_activate`/`on_deactivate`/`on_shutdown`.
 - [x] **MCP Bridge (Rust)**: `tagentacle bridge --mcp` command tunneling stdio MCP servers through the bus.
 - [x] **MCP Transport Layer**: `TagentacleClientTransport` and `TagentacleServerTransport` in `tagentacle-py`.
-- [x] **MCP-Publish Bridge Node**: Built-in MCP Server that exposes `publish()` as an MCP Tool.
+- [x] **Tagentacle MCP Server**: Built-in MCP Server exposing bus interaction tools (`publish_to_topic`, `subscribe_topic`, `list_nodes`, `list_topics`, `list_services`, `call_bus_service`, `ping_daemon`).
 - [x] **`tagentacle.toml` Spec**: Define and parse package manifest format.
 - [x] **Bringup Configuration Center**: Config-driven topology orchestration with parameter injection.
 - [x] **CLI Toolchain**: `daemon`, `run`, `launch`, `topic echo`, `service call`, `doctor`, `bridge`, `setup dep`, `setup clean`.
@@ -314,10 +419,13 @@ tagentacle setup clean --workspace .
 - [x] **Example Workspace**: `examples/src/` with agent_pkg, mcp_server_pkg, bringup_pkg as independent uv projects.
 
 ### Planned
+- [ ] **Standard Topics & Services**: Daemon built-in `/tagentacle/log`, `/tagentacle/node_events`, `/tagentacle/diagnostics`, `/tagentacle/ping`, `/tagentacle/list_nodes`, etc.
+- [ ] **SDK Log Integration**: Auto-publish node logs to `/tagentacle/log` via `get_logger()`.
 - [ ] **JSON Schema Validation**: Topic-level schema contracts for deterministic message validation.
-- [ ] **Node Lifecycle Tracking**: Heartbeat/liveliness monitoring in the Daemon.
+- [ ] **Node Lifecycle Tracking**: Heartbeat/liveliness monitoring in the Daemon via `/tagentacle/diagnostics`.
 - [ ] **Interface Package**: Cross-node JSON Schema contract definition packages.
 - [ ] **Action Mode**: Long-running async tasks with progress feedback.
+- [ ] **Parameter Server**: Global parameter store with `/tagentacle/parameter_events` notifications.
 - [ ] **vcstool + `.repos`**: Multi-repo one-click workspace pull and build.
 - [ ] **Web Dashboard**: Real-time topology, message flow, and node status visualizer.
 
