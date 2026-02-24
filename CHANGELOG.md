@@ -56,8 +56,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **Cargo.toml**: Added missing `clap` (with `derive` feature) and `uuid` (with `v4` feature) dependencies.
-- **Cargo.toml / Cargo.lock**: Lowercase package name (`Tagentacle` → `tagentacle`) for Cargo convention compliance.
-- **Quick start**: Updated instructions to use `example_ws` workspace directory; added `cargo install` step; assumed `tagentacle` in `PATH`.
+- **Cargo.toml / Cargo.lock**: Lowercase package name (`Tagentacle` → `tagentacle`) for Cargo convention compliance; added `[[bin]]` section (`name = "tagentacle"`, `path = "src/main.rs"`) so `cargo install --path .` correctly produces `~/.cargo/bin/tagentacle`; added `description` and `license` fields.
+- **Quick start**: Commands now run from workspace root instead of subdirectories; documented `cargo install --path .` installation workflow; added `cargo uninstall tagentacle` uninstall step.
 - **CLI**: Running `tagentacle` without a subcommand now prints full help text instead of blocking as a daemon; use `tagentacle daemon` to start the message bus.
 
 ### Changed
@@ -77,6 +77,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Updated bilingual SDK READMEs with uv environment workflow and workspace documentation.
 - **Branding**: Renamed project tagline to "ROS for AI Agent"; added ROS full name for context.
 - **Documentation**: Added Claude Code vs Tagentacle architectural comparison; added Standard Topics/Services specification; added Agent IO+Inference architecture design.
+- **Documentation**: Added standalone Installation section to README / README_CN with `cargo install --path .` / `cargo uninstall` instructions and PATH note.
+- **Documentation (Roadmap)**: Added `describe_topic_schema` to the completed MCP Server tools list; added Flattened Topic Tools API roadmap item (auto-generate expanded MCP tools from Topic JSON Schema definitions).
 
 ## [0.1.1] - 2026-02-22
 
