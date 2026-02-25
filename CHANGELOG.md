@@ -43,7 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - `tagentacle.toml` package manifest specification.
     - Full CLI toolchain: `run`, `launch`, `topic`, `service`, `bridge`, `setup dep/clean`, `doctor`.
   - Added comprehensive Roadmap & Status section with categorized task tracking.
-- **Branding**: Renamed project tagline to "ROS for AI Agent"; added ROS full name for context.
+- **Branding**: Renamed project tagline to "The ROS of AI Agents"; added ROS full name for context.
 - **Documentation**: Added Claude Code vs Tagentacle architectural comparison; added Standard Topics/Services specification; added Agent IO+Inference architecture design.
 - **Documentation**: Added standalone Installation section to README / README_CN with `cargo install --path .` / `cargo uninstall` instructions and PATH note.
 - **Documentation (Roadmap)**: Added `describe_topic_schema` as a planned MCP Server tool (TODO); added Flattened Topic Tools API roadmap item (auto-generate expanded MCP tools from Topic JSON Schema definitions).

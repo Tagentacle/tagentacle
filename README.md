@@ -1,4 +1,4 @@
-# Tagentacle: ROS for AI Agent 🐙
+# Tagentacle: The ROS of AI Agents 🐙
 
 [![GitHub](https://img.shields.io/badge/GitHub-Tagentacle-blue)](https://github.com/Tagentacle/tagentacle)
 

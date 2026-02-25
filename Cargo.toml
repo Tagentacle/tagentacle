@@ -2,7 +2,7 @@
 name = "tagentacle"
 version = "0.1.0"
 edition = "2024"
-description = "Tagentacle: ROS for AI Agent — High-performance message bus daemon and CLI"
+description = "Tagentacle: The ROS of AI Agents — High-performance message bus daemon and CLI"
 license = "MIT"
 
 [[bin]]

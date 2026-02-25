@@ -16,7 +16,7 @@ use uuid::Uuid;
 
 #[derive(Parser)]
 #[command(name = "tagentacle")]
-#[command(about = "Tagentacle: ROS for AI Agent", long_about = None)]
+#[command(about = "Tagentacle: The ROS of AI Agents", long_about = None)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
