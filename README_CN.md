@@ -121,7 +121,7 @@ Tagentacle 不是另一个 Claude Code，**它是管理无数个 "Claude 级别�
 
 1.  **`tagentacle` (Rust)**：高性能消息路由器 (Daemon/Broker) 与命令行工具。
 2.  **`tagentacle-py` (Python)**：官方 Python SDK (类比 ROS 的 `rclpy`)，提供双层异步 API。
-3.  **`tagentacle-ecosystem` (计划中)**：标准 Pkg 集合 (如 `chatbot_ui_pkg`, `mcp_sqlite_wrapper_pkg`)。
+3.  **`tagentacle-ecosystem` (成长中)**：官方示例 Pkg 集合，包含完整聊天机器人系统（`example-agent`、`example-inference`、`example-memory`、`example-frontend`、`example-mcp-server`、`example-bringup`）。
 
 ### 🧩 ROS 2 概念映射
 
@@ -373,7 +373,7 @@ Tagentacle Daemon 默认监听 `TCP 19999` 端口。所有通信均为换行符�
 CLI 是开发者的主要交互入口：
 - `tagentacle daemon`：启动本地 TCP 消息总线。
 - `tagentacle run --pkg <dir>`：激活包的 `.venv` 并启动其 Node。
-- `tagentacle launch <config.toml>`：根据拓扑配置编排多节点，每个节点独立 venv。
+- `tagentacle launch <config.toml>`：根据拓扑配置编排多节点，每个节点独立 venv；自动 `git clone` `[workspace]` 声明的仓库，实现一键工作空间引导。
 - `tagentacle topic echo <topic>`：订阅并实时打印消息。
 - `tagentacle service call <srv> <json>`：从命令行测试服务。
 - `tagentacle bridge --mcp <cmd>`：将外部 MCP Server (stdio) 桥接到总线。
@@ -417,6 +417,8 @@ tagentacle setup clean --workspace .
 - [x] **环境管理**：基于 uv 的逐包 `.venv` 隔离，工作空间 `install/` 结构与符号链接。
 - [x] **秘钥管理**：`secrets.toml` 自动加载，Bringup 环境变量注入。
 - [x] **SDK 工具函数**：`load_pkg_toml`、`discover_packages`、`find_workspace_root`。
+- [x] **工作空间 Repo 自动克隆**：`tagentacle launch` 读取 `[workspace]` 配置段，启动前自动 `git clone` 所有声明的仓库。
+- [x] **示例聊天机器人系统**：5 节点完整系统（`example-agent`、`example-inference`、`example-memory`、`example-frontend`、`example-mcp-server`），通过 `example-bringup` 一键启动，端到端验证通过。
 - [x] **示例 Workspace**：`examples/src/` 包含 agent_pkg、mcp_server_pkg、bringup_pkg，均为独立 uv 项目。
 
 ### 计划中
@@ -428,7 +430,7 @@ tagentacle setup clean --workspace .
 - [ ] **Interface Package**：跨节点 JSON Schema 契约定义包。
 - [ ] **Action 模式**：长程异步任务，支持进度反馈。
 - [ ] **Parameter Server**：全局参数存储，配合 `/tagentacle/parameter_events` 通知。
-- [ ] **vcstool + `.repos`**：多仓一键拉取与工作空间构建。
+- [ ] **vcstool 兼容**：支持 `.repos` 文件格式，与 ROS 生态工具链互操作。
 - [ ] **Web Dashboard**：实时拓扑、消息流和节点状态可视化。
 
 ---

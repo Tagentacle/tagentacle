@@ -1,17 +1,15 @@
 # Changelog — Tagentacle Core (Rust)
 
 All notable changes to the **Tagentacle Core** (Rust daemon & CLI) will be documented in this file.
-For Python SDK changes see [`tagentacle-py/CHANGELOG.md`](../tagentacle-py/CHANGELOG.md).
+For Python SDK changes see [`python-sdk-core`](https://github.com/Tagentacle/python-sdk-core) and [`python-sdk-mcp`](https://github.com/Tagentacle/python-sdk-mcp) changelogs.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
-### Changed
-- **`find_sdk_path()`**: Updated to search for `python-sdk-core/` and `python-sdk-mcp/` directories (new 1-repo-1-pkg layout), joining both into `PYTHONPATH`. Removed legacy `tagentacle-py/` fallback.
+## [0.2.0] - 2026-02-26
 
 ### Added
+- **Workspace Repo Auto-Clone**: `tagentacle launch` now reads the `[workspace]` section in `tagentacle.toml` and automatically `git clone`s declared repos into the workspace before starting nodes. Enables one-command multi-repo workspace bootstrap from a single bringup config.
 - **CLI Tools Expansion**:
   - `tagentacle topic echo <topic>` — subscribe and print messages from a topic.
   - `tagentacle service call <service> <payload>` — call a service and print the response.
@@ -28,7 +26,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`tagentacle.toml` Package Manifest** (specification):
   - Defined `[package]` (name, version, type, description, entry_point) and `[dependencies]` sections.
 
+### Removed
+- **`find_sdk_path()`**: Removed SDK auto-discovery helper. SDK packages are now managed as explicit workspace repos via the `[workspace]` section in `tagentacle.toml` and cloned automatically by `tagentacle launch`.
+
 ### Fixed
+- **TOML Parser**: Replaced ad-hoc manual TOML parsing with `serde` + `toml` crate for robust, correct config file handling. Fixes panics and silent misparses in bringup configs with complex values.
 - **Cargo.toml**: Added missing `clap` (with `derive` feature) and `uuid` (with `v4` feature) dependencies.
 - **Cargo.toml / Cargo.lock**: Lowercase package name (`Tagentacle` → `tagentacle`) for Cargo convention compliance; added `[[bin]]` section (`name = "tagentacle"`, `path = "src/main.rs"`) so `cargo install --path .` correctly produces `~/.cargo/bin/tagentacle`; added `description` and `license` fields.
 - **Quick start**: Commands now run from workspace root instead of subdirectories; documented `cargo install --path .` installation workflow; added `cargo uninstall tagentacle` uninstall step.
