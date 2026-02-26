@@ -650,9 +650,14 @@ async fn run_package(pkg_path: String, addr: String) -> Result<()> {
 fn find_sdk_path(from: &Path) -> Option<String> {
     let mut dir = from.to_path_buf();
     for _ in 0..10 {
-        let candidate = dir.join("tagentacle-py");
-        if candidate.is_dir() {
-            return Some(candidate.to_string_lossy().to_string());
+        let core = dir.join("python-sdk-core");
+        let mcp = dir.join("python-sdk-mcp");
+        if core.is_dir() {
+            let mut paths = vec![core.to_string_lossy().to_string()];
+            if mcp.is_dir() {
+                paths.push(mcp.to_string_lossy().to_string());
+            }
+            return Some(paths.join(":"));
         }
         if !dir.pop() { break; }
     }
