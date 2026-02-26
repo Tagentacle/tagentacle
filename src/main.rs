@@ -965,6 +965,78 @@ async fn run_setup_dep(pkg_path: String) -> Result<()> {
     Ok(())
 }
 
+/// Scan workspace for [workspace.repos] sections in any tagentacle.toml and
+/// auto-clone missing repositories into the workspace root.
+async fn clone_workspace_repos(ws: &Path) -> Result<()> {
+    // Collect all (repo_name, git_url) pairs from every tagentacle.toml
+    let mut repos_to_clone: Vec<(String, String)> = Vec::new();
+
+    let existing_pkgs = find_all_packages(ws)?;
+    for (_name, pkg_path) in &existing_pkgs {
+        let toml_path = pkg_path.join("tagentacle.toml");
+        if !toml_path.exists() { continue; }
+
+        let content = std::fs::read_to_string(&toml_path)
+            .with_context(|| format!("Cannot read {}", toml_path.display()))?;
+        let doc: toml::Value = content.parse::<toml::Value>()
+            .with_context(|| format!("Invalid TOML in {}", toml_path.display()))?;
+
+        // Navigate: workspace -> repos -> { repo_name: { git: "url" } }
+        if let Some(workspace) = doc.get("workspace").and_then(|v| v.as_table()) {
+            if let Some(repos) = workspace.get("repos").and_then(|v| v.as_table()) {
+                for (repo_name, repo_val) in repos {
+                    if let Some(git_url) = repo_val.get("git").and_then(|v| v.as_str()) {
+                        repos_to_clone.push((repo_name.clone(), git_url.to_string()));
+                    }
+                }
+            }
+        }
+    }
+
+    if repos_to_clone.is_empty() {
+        return Ok(());
+    }
+
+    println!("\n--- Workspace Dependency Repos ---");
+    let mut cloned = 0usize;
+    let mut skipped = 0usize;
+
+    for (repo_name, git_url) in &repos_to_clone {
+        // Derive expected directory name from git URL (last segment without .git)
+        let dir_name = git_url
+            .rsplit('/')
+            .next()
+            .unwrap_or(repo_name)
+            .trim_end_matches(".git");
+        let target_dir = ws.join(dir_name);
+
+        if target_dir.exists() {
+            println!("  {} — already exists, skipping.", dir_name);
+            skipped += 1;
+            continue;
+        }
+
+        println!("  Cloning {} → {} ...", git_url, target_dir.display());
+        let status = Command::new("git")
+            .args(["clone", git_url, &target_dir.to_string_lossy()])
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .status()
+            .await
+            .context("Failed to run `git clone`. Is git installed?")?;
+
+        if status.success() {
+            println!("  ✓ Cloned {}.", dir_name);
+            cloned += 1;
+        } else {
+            eprintln!("  ✗ Failed to clone {} (exit {}). Continuing...", dir_name, status);
+        }
+    }
+
+    println!("--- Repos: {} cloned, {} skipped ---\n", cloned, skipped);
+    Ok(())
+}
+
 /// Scan a workspace directory for all tagentacle packages and run `uv sync` in each.
 /// Then generate the install/ workspace structure with symlinks.
 async fn run_setup_all(workspace_path: String) -> Result<()> {
@@ -974,7 +1046,11 @@ async fn run_setup_all(workspace_path: String) -> Result<()> {
     println!("Tagentacle Setup — Workspace: {}", ws.display());
     println!("==========================================");
 
-    // Recursively find directories containing tagentacle.toml
+    // Phase 0: Auto-clone missing repos declared in [workspace.repos]
+    clone_workspace_repos(&ws).await?;
+
+    // Phase 1: Recursively find directories containing tagentacle.toml
+    // (re-scan after cloning to pick up newly cloned packages)
     let pkgs = find_all_packages(&ws)?;
     if pkgs.is_empty() {
         println!("No tagentacle packages found in {}", ws.display());
