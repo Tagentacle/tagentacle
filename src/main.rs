@@ -626,14 +626,10 @@ async fn run_package(pkg_path: String, addr: String) -> Result<()> {
 
     println!("  Command: {}", shell_command);
 
-    // Find SDK path for PYTHONPATH
-    let sdk_path = find_sdk_path(&pkg_dir);
-
     let mut child = Command::new("bash")
         .args(["-c", &shell_command])
         .current_dir(&pkg_dir)
         .env("TAGENTACLE_DAEMON_URL", format!("tcp://{}", addr))
-        .env("PYTHONPATH", sdk_path.unwrap_or_default())
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
@@ -645,23 +641,6 @@ async fn run_package(pkg_path: String, addr: String) -> Result<()> {
         eprintln!("Package exited with status: {}", status);
     }
     Ok(())
-}
-
-fn find_sdk_path(from: &Path) -> Option<String> {
-    let mut dir = from.to_path_buf();
-    for _ in 0..10 {
-        let core = dir.join("python-sdk-core");
-        let mcp = dir.join("python-sdk-mcp");
-        if core.is_dir() {
-            let mut paths = vec![core.to_string_lossy().to_string()];
-            if mcp.is_dir() {
-                paths.push(mcp.to_string_lossy().to_string());
-            }
-            return Some(paths.join(":"));
-        }
-        if !dir.pop() { break; }
-    }
-    None
 }
 
 // --- CLI Tool: launch ---
@@ -698,13 +677,9 @@ async fn run_launch(config_path: String, daemon_addr: String) -> Result<()> {
         }
     }
 
-    // Find SDK path from config directory
-    let sdk_path = find_sdk_path(config_dir).unwrap_or_default();
-
     // Build env vars from parameters
     let mut env_vars: HashMap<String, String> = HashMap::new();
     env_vars.insert("TAGENTACLE_DAEMON_URL".to_string(), format!("tcp://{}", addr));
-    env_vars.insert("PYTHONPATH".to_string(), sdk_path);
     for (k, v) in &config.parameters {
         env_vars.insert(k.clone(), v.clone());
     }
@@ -728,6 +703,9 @@ async fn run_launch(config_path: String, daemon_addr: String) -> Result<()> {
     let nodes_dir = config_dir.parent().unwrap_or(config_dir)
         .parent().unwrap_or(config_dir); // Go up from launch/ to bringup_pkg/ to src/
 
+    // Build a lookup table: tagentacle.toml package name → directory path
+    let known_pkgs = find_all_packages(nodes_dir).unwrap_or_default();
+
     for node in &config.nodes {
         // Wait for dependencies
         for dep in &node.depends_on {
@@ -741,9 +719,23 @@ async fn run_launch(config_path: String, daemon_addr: String) -> Result<()> {
             tokio::time::sleep(std::time::Duration::from_secs(node.startup_delay)).await;
         }
 
-        let pkg_dir = nodes_dir.join(&node.package);
+        // Resolve package directory: first by tagentacle.toml name, then by dir name,
+        // then try kebab-case conversion (snake_case → kebab-case).
+        let pkg_dir = known_pkgs.iter()
+            .find(|(name, _)| name == &node.package)
+            .map(|(_, p)| p.clone())
+            .unwrap_or_else(|| {
+                let direct = nodes_dir.join(&node.package);
+                if direct.exists() {
+                    direct
+                } else {
+                    // Try kebab-case: example_mcp_server → example-mcp-server
+                    nodes_dir.join(node.package.replace('_', "-"))
+                }
+            });
         if !pkg_dir.exists() {
-            eprintln!("[{}] Package dir not found: {}", node.name, pkg_dir.display());
+            eprintln!("[{}] Package dir not found: {} (looked for '{}' in {})",
+                node.name, pkg_dir.display(), node.package, nodes_dir.display());
             continue;
         }
 
