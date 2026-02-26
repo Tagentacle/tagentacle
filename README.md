@@ -410,6 +410,7 @@ tagentacle setup clean --workspace .
 | **Git Repos** | ✅ | `[workspace.repos]` in `tagentacle.toml` — auto-clone missing repos on `setup dep --all` |
 | **Python (uv)** | ✅ | Per-package `uv sync` with `.venv` isolation |
 | **apt packages** | ❌ | Planned — system-level dependencies |
+| **PyPI packages** | ❌ | Planned — system-level SDK distribution via `pip install tagentacle-py-core` |
 | **npm packages** | ❌ | Planned — Node.js tool and MCP server dependencies |
 | **Build commands** | ❌ | Planned — custom build steps (e.g., `cargo build`, `make`) |
 
@@ -462,19 +463,20 @@ cargo uninstall tagentacle
 
 ### Quick Start
 
-The recommended workflow is to clone a **bringup package** and let the CLI handle everything:
+The recommended workflow is to clone a **bringup package** into a workspace's `src/` directory and let the CLI handle everything:
 
-1. **Clone the bringup repo** into a workspace directory:
+1. **Create a workspace and clone the bringup repo**:
    ```bash
-   mkdir my_workspace && cd my_workspace
+   mkdir -p my_workspace/src && cd my_workspace/src
    git clone https://github.com/Tagentacle/example-bringup.git
    ```
 
 2. **Set up workspace dependencies** (auto-clones repos & installs Python deps):
    ```bash
-   tagentacle setup dep --all .
+   cd ..  # back to my_workspace/
+   tagentacle setup dep --all src
    ```
-   This reads `[workspace.repos]` from `example-bringup/tagentacle.toml`, clones missing repos (e.g., `example-agent`, `example-mcp-server`), then runs `uv sync` in each package.
+   This reads `[workspace.repos]` from `example-bringup/tagentacle.toml`, clones missing repos (SDK + app packages) into `src/`, then runs `uv sync` in each package.
 
 3. **Start the Daemon** (in a separate terminal):
    ```bash
@@ -483,5 +485,5 @@ The recommended workflow is to clone a **bringup package** and let the CLI handl
 
 4. **Launch the system**:
    ```bash
-   tagentacle launch --config example-bringup/launch/system_launch.toml
+   tagentacle launch src/example-bringup/launch/system_launch.toml
    ```

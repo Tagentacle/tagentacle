@@ -796,6 +796,39 @@ async fn run_launch(config_path: String, daemon_addr: String) -> Result<()> {
     Ok(())
 }
 
+/// Raw TOML structures for serde deserialization
+#[derive(Deserialize)]
+struct LaunchToml {
+    daemon: Option<DaemonToml>,
+    nodes: Option<Vec<LaunchNodeToml>>,
+    parameters: Option<HashMap<String, String>>,
+    secrets: Option<SecretsToml>,
+}
+
+#[derive(Deserialize)]
+struct DaemonToml {
+    addr: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct LaunchNodeToml {
+    name: String,
+    package: String,
+    command: String,
+    #[serde(default)]
+    depends_on: Vec<String>,
+    #[serde(default)]
+    startup_delay: u64,
+    #[allow(dead_code)]
+    #[serde(default)]
+    description: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct SecretsToml {
+    secrets_file: Option<String>,
+}
+
 struct LaunchConfig {
     daemon_addr: Option<String>,
     nodes: Vec<LaunchNode>,
@@ -812,99 +845,23 @@ struct LaunchNode {
 }
 
 fn parse_launch_toml(content: &str) -> Result<LaunchConfig> {
-    let mut config = LaunchConfig {
-        daemon_addr: None,
-        nodes: Vec::new(),
-        parameters: HashMap::new(),
-        secrets_file: None,
-    };
+    let raw: LaunchToml = toml::from_str(content)
+        .with_context(|| "Failed to parse launch TOML")?;
 
-    let mut current_section = String::new();
-    let mut current_node: Option<LaunchNode> = None;
+    let nodes = raw.nodes.unwrap_or_default().into_iter().map(|n| LaunchNode {
+        name: n.name,
+        package: n.package,
+        command: n.command,
+        depends_on: n.depends_on,
+        startup_delay: n.startup_delay,
+    }).collect();
 
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') {
-            continue;
-        }
-
-        // Section headers
-        if trimmed == "[[nodes]]" {
-            if let Some(node) = current_node.take() {
-                config.nodes.push(node);
-            }
-            current_node = Some(LaunchNode {
-                name: String::new(),
-                package: String::new(),
-                command: String::new(),
-                depends_on: Vec::new(),
-                startup_delay: 0,
-            });
-            current_section = "nodes".to_string();
-            continue;
-        }
-        if trimmed.starts_with('[') && trimmed.ends_with(']') {
-            if let Some(node) = current_node.take() {
-                config.nodes.push(node);
-            }
-            current_section = trimmed[1..trimmed.len()-1].to_string();
-            continue;
-        }
-
-        // Key-value pairs
-        if let Some(eq_pos) = trimmed.find('=') {
-            let key = trimmed[..eq_pos].trim();
-            let raw_val = trimmed[eq_pos+1..].trim();
-
-            match current_section.as_str() {
-                "daemon" => {
-                    if key == "addr" {
-                        config.daemon_addr = Some(raw_val.trim_matches('"').to_string());
-                    }
-                }
-                "nodes" => {
-                    if let Some(ref mut node) = current_node {
-                        match key {
-                            "name" => node.name = raw_val.trim_matches('"').to_string(),
-                            "package" => node.package = raw_val.trim_matches('"').to_string(),
-                            "command" => node.command = raw_val.trim_matches('"').to_string(),
-                            "startup_delay" => {
-                                node.startup_delay = raw_val.parse().unwrap_or(0)
-                            }
-                            "depends_on" => {
-                                // Parse ["dep1", "dep2"]
-                                let inner = raw_val.trim_matches(|c| c == '[' || c == ']');
-                                node.depends_on = inner.split(',')
-                                    .map(|s| s.trim().trim_matches('"').to_string())
-                                    .filter(|s| !s.is_empty())
-                                    .collect();
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-                "parameters" => {
-                    config.parameters.insert(
-                        key.to_string(),
-                        raw_val.trim_matches('"').to_string(),
-                    );
-                }
-                "secrets" => {
-                    if key == "secrets_file" {
-                        config.secrets_file = Some(raw_val.trim_matches('"').to_string());
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-
-    // Don't forget the last node
-    if let Some(node) = current_node {
-        config.nodes.push(node);
-    }
-
-    Ok(config)
+    Ok(LaunchConfig {
+        daemon_addr: raw.daemon.and_then(|d| d.addr),
+        nodes,
+        parameters: raw.parameters.unwrap_or_default(),
+        secrets_file: raw.secrets.and_then(|s| s.secrets_file),
+    })
 }
 
 // --- CLI Tool: setup dep (uv sync) ---
