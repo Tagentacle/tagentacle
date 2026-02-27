@@ -7,7 +7,6 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::process::Command;
 use tokio::sync::{mpsc, Mutex};
@@ -28,15 +27,6 @@ enum Commands {
     Daemon {
         #[arg(short, long, default_value = "127.0.0.1:19999")]
         addr: String,
-    },
-    /// Bridges an external MCP Server (stdio) to the Tagentacle bus
-    Bridge {
-        /// Command to start the MCP server (e.g., 'npx -y @modelcontextprotocol/server-sqlite')
-        #[arg(long)]
-        mcp: String,
-        /// Optional node ID for this bridge (default: pseudo-random)
-        #[arg(short, long)]
-        node_id: Option<String>,
     },
     /// Topic introspection commands
     Topic {
@@ -196,9 +186,6 @@ async fn main() -> Result<()> {
         Some(Commands::Daemon { addr }) => {
             run_daemon(addr).await?;
         }
-        Some(Commands::Bridge { mcp, node_id }) => {
-            run_bridge(mcp, node_id).await?;
-        }
         Some(Commands::Topic { action }) => match action {
             TopicAction::Echo { topic, addr } => {
                 run_topic_echo(addr, topic).await?;
@@ -328,113 +315,6 @@ async fn handle_daemon_connection(socket: TcpStream, router: SharedRouter) -> Re
         }
     }
     if let Some(node_id) = current_node_id { println!("Node '{}' disconnected", node_id); }
-    Ok(())
-}
-
-// --- Bridge Logic ---
-
-async fn run_bridge(mcp_cmd: String, node_id_opt: Option<String>) -> Result<()> {
-    let node_id = node_id_opt.unwrap_or_else(|| format!("bridge_{}", &Uuid::new_v4().to_string()[..8]));
-    let rpc_service = format!("/mcp/{}/rpc", node_id);
-    let audit_topic = "/mcp/traffic";
-
-    println!("Starting Bridge Node: {}", node_id);
-    println!("MCP Command: {}", mcp_cmd);
-
-    // 1. Connect to Daemon
-    let stream = TcpStream::connect("127.0.0.1:19999").await
-        .context("Failed to connect to Tagentacle Daemon. Is it running?")?;
-    let mut framed = Framed::new(stream, LinesCodec::new());
-
-    // 2. Advertise Tunnel Service
-    let advertise = json!({
-        "op": "advertise_service",
-        "service": rpc_service,
-        "node_id": node_id
-    });
-    framed.send(advertise.to_string()).await?;
-
-    // 3. Start Subprocess
-    let mut child = if cfg!(target_os = "windows") {
-        Command::new("cmd").args(["/C", &mcp_cmd]).stdin(Stdio::piped()).stdout(Stdio::piped()).spawn()?
-    } else {
-        Command::new("sh").args(["-c", &mcp_cmd]).stdin(Stdio::piped()).stdout(Stdio::piped()).spawn()?
-    };
-
-    let mut child_stdin = child.stdin.take().unwrap();
-    let child_stdout = child.stdout.take().unwrap();
-    let mut child_reader = BufReader::new(child_stdout).lines();
-
-    println!("Bridge ready. Listening for Tagentacle calls on {}...", rpc_service);
-
-    // Track active requests to map responses back
-    // Mapping: JSON-RPC ID (from client req) -> (Service Request ID, Caller ID)
-    let mut pending_calls: HashMap<Value, (String, String)> = HashMap::new();
-
-    loop {
-        tokio::select! {
-            // A. From Tagentacle Bus -> To MCP Subprocess (stdin)
-            bus_msg = framed.next() => {
-                if let Some(Ok(line)) = bus_msg {
-                    let action: Action = serde_json::from_str(&line)?;
-                    if let Action::CallService { payload, request_id, caller_id, .. } = action {
-                        // Extract JSON-RPC ID to track it
-                        if let Some(mcp_id) = payload.get("id") {
-                            pending_calls.insert(mcp_id.clone(), (request_id, caller_id));
-                        }
-
-                        // Forward JSON-RPC payload to stdin
-                        let mcp_raw = serde_json::to_string(&payload)?;
-                        child_stdin.write_all(mcp_raw.as_bytes()).await?;
-                        child_stdin.write_all(b"\n").await?;
-                        child_stdin.flush().await?;
-                        
-                        // Mirrror to audit topic
-                        let audit = json!({
-                            "op": "publish", "topic": audit_topic, "sender": node_id,
-                            "payload": {"direction": "bus_to_mcp", "data": payload}
-                        });
-                        let _ = framed.send(audit.to_string()).await;
-                    }
-                } else { break; }
-            }
-
-            // B. From MCP Subprocess (stdout) -> To Tagentacle Bus (ServiceResponse / CallService)
-            mcp_line = child_reader.next_line() => {
-                if let Ok(Some(line)) = mcp_line {
-                    let mcp_val: Value = match serde_json::from_str(&line) {
-                        Ok(v) => v,
-                        Err(_) => continue,
-                    };
-                    
-                    // Mirroring
-                    let audit = json!({
-                        "op": "publish", "topic": audit_topic, "sender": node_id,
-                        "payload": {"direction": "mcp_to_bus", "data": mcp_val}
-                    });
-                    let _ = framed.send(audit.to_string()).await;
-
-                    // If it's a Response (has 'id')
-                    if let Some(mcp_id) = mcp_val.get("id") {
-                        if let Some((req_id, caller_id)) = pending_calls.remove(mcp_id) {
-                            let resp = json!({
-                                "op": "service_response",
-                                "service": rpc_service,
-                                "request_id": req_id,
-                                "payload": mcp_val,
-                                "caller_id": caller_id
-                            });
-                            let _ = framed.send(resp.to_string()).await;
-                        }
-                    } else if mcp_val.get("method").is_some() {
-                        // It's a Notification or Request from Server (Sampling)
-                        // TODO: Implement session-aware reverse routing
-                    }
-                } else { break; }
-            }
-        }
-    }
-
     Ok(())
 }
 
