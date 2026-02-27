@@ -209,24 +209,21 @@ class AliceAgent(LifecycleNode):
         self.logger.info("Alice shutting down gracefully.")
 ```
 
-### Built-in Node: MCP-Publish Bridge
-The SDK includes a special **MCP Server Node** that abstracts the bus `publish()` capability as a standard MCP Tool, allowing Agent Nodes to autonomously send messages to bus Topics via tool calls:
-```python
-# The MCP-Publish bridge exposes bus topics as MCP tools:
-# Tool: "publish_to_topic"
-# Args: {"topic": "/alerts/critical", "payload": {"msg": "Server down!"}}
-```
+### Built-in Node: TagentacleMCPServer
+The SDK includes a built-in **MCP Server Node** that exposes all bus interactions as standard MCP Tools (publish, subscribe, call_service, introspection). It inherits `MCPServerNode` and runs its own Streamable HTTP endpoint.
 
 ---
 
-## 🛠️ MCP Integration: Bus-as-Transport
+## 🛠️ MCP Integration: Local Sessions + Direct HTTP
 
-Tagentacle solves the problem of MCP Sessions being non-serializable across processes:
+Inspired by ROS 2's TF2 pattern, Tagentacle localizes MCP session management within Agent Nodes:
 
 ### Design Principles
-*   **Session Localization**: MCP Client/Server Sessions stay in node memory—never transmitted cross-process.
-*   **Bus Traffic Forwarding**: Custom `TagentacleTransport` wraps JSON-RPC instructions into Tagentacle Service requests. This achieves "Bus-as-Transport", making tool calls transparent and efficient in distributed environments.
-*   **Dual-Track Integration**: MCP's raw JSON payload is simultaneously mirrored to a dedicated Topic (e.g., `/mcp/traffic`) for non-intrusive observation and debugging.
+*   **Session Localization**: MCP Client Sessions stay in Agent node memory. Agents connect directly to MCP Servers via native MCP SDK Streamable HTTP client.
+*   **MCPServerNode Base Class**: MCP Servers inherit `MCPServerNode` (LifecycleNode subclass), which auto-runs Streamable HTTP and publishes `MCPServerDescription` to `/mcp/directory`.
+*   **Unified Discovery**: Agents subscribe to `/mcp/directory` to auto-discover all available MCP servers (native HTTP + Gateway-proxied stdio servers).
+*   **Full Protocol Support**: Direct Agent↔Server sessions preserve all MCP capabilities including sampling, notifications, and resources.
+*   **MCP Gateway**: A separate `mcp-gateway` package provides transport-level stdio→HTTP relay for legacy MCP servers, without parsing MCP semantics.
 
 ### Seamless SDK Integration
 ```python
@@ -255,7 +252,7 @@ When the Daemon starts, it automatically creates a set of **system-reserved Topi
 | Prefix | Purpose | Managed By |
 |---|---|---|
 | `/tagentacle/*` | **System reserved.** Daemon & SDK core functionality | Core library |
-| `/mcp/*` | MCP protocol (audit trail, RPC tunnels) | MCP Transport / Bridge |
+| `/mcp/*` | MCP discovery and gateway services | MCPServerNode / Gateway |
 
 User-defined Topics should **not** use the above prefixes.
 
@@ -266,7 +263,7 @@ User-defined Topics should **not** use the above prefixes.
 | `/tagentacle/log` | ROS `/rosout` | Global log aggregation. All nodes auto-publish logs here via SDK; Daemon also publishes system events. | SDK Nodes (auto) + Daemon |
 | `/tagentacle/node_events` | ROS lifecycle events | Node lifecycle events: connected, disconnected, lifecycle state transitions. Powers real-time topology in dashboards. | Daemon (auto) + `LifecycleNode` (auto) |
 | `/tagentacle/diagnostics` | ROS `/diagnostics` | Node health reports: heartbeat, uptime, message counters, error counts.  | SDK `Node.spin()` (periodic) |
-| `/mcp/traffic` | _(none)_ | MCP JSON-RPC audit stream. All tunneled MCP traffic is mirrored here for non-intrusive observation. **(Already implemented in Bridge.)** | Bridge / MCP Transport |
+| `/mcp/directory` | _(none)_ | MCP server discovery. `MCPServerDescription` messages published by MCP Server Nodes and Gateway on activation. Agents subscribe to auto-discover servers. | MCPServerNode / Gateway |
 
 ### Standard Services (Daemon built-in)
 
@@ -375,7 +372,7 @@ The CLI provides the primary interface for developers:
 - `tagentacle launch <config.toml>`: Orchestrates multiple Nodes from topology config, each with isolated venvs.
 - `tagentacle topic echo <topic>`: Subscribes and prints real-time messages.
 - `tagentacle service call <srv> <json>`: Tests a service from the command line.
-- `tagentacle bridge --mcp <cmd>`: Bridges an external MCP Server (stdio) to the bus.
+- ~~`tagentacle bridge`~~: Removed in v0.3.0. Use `mcp-gateway` package instead.
 - `tagentacle setup dep --pkg <dir>`: Runs `uv sync` for a single package.
 - `tagentacle setup dep --all <workspace>`: Installs all packages and generates `install/` structure with `.venv` symlinks + `setup_env.bash`.
 - `tagentacle setup clean --workspace <dir>`: Removes the generated `install/` directory.
@@ -418,12 +415,14 @@ tagentacle setup clean --workspace .
 - [x] **Rust Daemon**: Topic Pub/Sub and Service Req/Res message routing.
 - [x] **Python SDK (Simple API)**: `Node` class with `connect`, `publish`, `subscribe`, `service`, `call_service`, `spin`.
 - [x] **Python SDK Dual-Layer API**: `LifecycleNode` with `on_configure`/`on_activate`/`on_deactivate`/`on_shutdown`.
-- [x] **MCP Bridge (Rust)**: `tagentacle bridge --mcp` command tunneling stdio MCP servers through the bus.
-- [x] **MCP Transport Layer**: `TagentacleClientTransport` and `TagentacleServerTransport` in `tagentacle-py`.
+- [x] ~~**MCP Bridge (Rust)**~~: Removed in v0.3.0 — superseded by `mcp-gateway` (Python Gateway Node with transport-level relay).
+- [x] ~~**MCP Transport Layer**~~: Removed in python-sdk-mcp v0.2.0 — replaced by direct Streamable HTTP connections.
+- [x] **MCPServerNode Base Class**: `python-sdk-mcp` v0.2.0 — base class for MCP Server Nodes with auto Streamable HTTP + `/mcp/directory` publishing.
+- [x] **MCP Gateway**: `mcp-gateway` v0.1.0 — transport-level stdio→HTTP relay + directory service.
 - [x] **Tagentacle MCP Server**: Built-in MCP Server exposing bus interaction tools (FastMCP-based, auto-schema from type hints).
 - [x] **`tagentacle.toml` Spec**: Define and parse package manifest format.
 - [x] **Bringup Configuration Center**: Config-driven topology orchestration with parameter injection.
-- [x] **CLI Toolchain**: `daemon`, `run`, `launch`, `topic echo`, `service call`, `doctor`, `bridge`, `setup dep`, `setup clean`.
+- [x] **CLI Toolchain**: `daemon`, `run`, `launch`, `topic echo`, `service call`, `doctor`, `setup dep`, `setup clean`.
 - [x] **Environment Management**: uv-based per-package `.venv` isolation, workspace `install/` structure with symlinks.
 - [x] **Secrets Management**: `secrets.toml` auto-loading, bringup environment variable injection.
 - [x] **SDK Utilities**: `load_pkg_toml`, `discover_packages`, `find_workspace_root`.

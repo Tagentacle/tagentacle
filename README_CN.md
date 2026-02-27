@@ -210,24 +210,23 @@ class AliceAgent(LifecycleNode):
         self.logger.info("Alice 正在优雅关闭。")
 ```
 
-### 预制节点：MCP-Publish 桥接器
-SDK 内置了一个特殊的 **MCP Server Node**，将总线 `publish()` 抽象为标准 MCP Tool，使 Agent Node 能通过调用工具的方式自主向总线 Topic 发送消息：
-```python
-# MCP-Publish 桥接器将总线话题暴露为 MCP 工具：
-# Tool: "publish_to_topic"
-# Args: {"topic": "/alerts/critical", "payload": {"msg": "服务器宕机！"}}
-```
+### 预制节点：TagentacleMCPServer
+SDK 内置两个关键节点：
+*   **TagentacleMCPServer**：将总线的 `publish`、`subscribe`、`call_service` 等能力暴露为标准 MCP Tool。继承 `MCPServerNode`，自行运行 Streamable HTTP 端点。
+*   **MCPGatewayNode**：传输层中继 — 将仅支持 stdio 的传统 MCP Server 适配为 Streamable HTTP，发布远程服务器 URL 到 `/mcp/directory`。
 
 ---
 
-## 🛠️ MCP 集成：总线即传输层 (Bus-as-Transport)
+## 🛠️ MCP 集成：本地会话 + HTTP 直连
 
-Tagentacle 解决了 MCP Session 无法序列化跨进程传输的问题：
+借鉴 ROS 2 TF2 的设计理念，Tagentacle 将 MCP 会话管理完全本地化于 Agent 节点：
 
 ### 设计原则
-*   **会话本地化**：MCP Client/Server Session 保持在节点内存中，不跨进程传输。
-*   **总线转发流量**：自定义 `TagentacleTransport` 将 JSON-RPC 指令封装进 Tagentacle Service 请求，实现"总线即传输层"，工具调用在分布式环境下透明高效。
-*   **双轨集成**：MCP 原始 JSON 负载同时被镜像到专用 Topic（如 `/mcp/traffic`），实现无感观测和调试。
+*   **会话本地化**：MCP Client Session 保持在 Agent 节点内存中。Agent 通过原生 MCP SDK HTTP Client 直连 MCP Server 的 Streamable HTTP 端点。
+*   **MCPServerNode 基类**：MCP Server 继承 `MCPServerNode`（LifecycleNode 子类），自动运行 Streamable HTTP 服务并在激活时向 `/mcp/directory` Topic 发布 `MCPServerDescription`。
+*   **统一发现**：Agent 订阅 `/mcp/directory` Topic 即可自动发现所有可用 MCP Server（包括原生 HTTP Server 和 Gateway 代理的 stdio Server）。
+*   **完整协议支持**：因 MCP 会话直接在 Agent ↔ Server 之间建立，所有 MCP 功能（sampling、notifications、resources 等）原生可用。
+*   **MCP Gateway**：独立 `mcp-gateway` 包提供传输层 stdio→HTTP 中继，不解析 MCP 语义。
 
 ### 无感 SDK 接入
 ```python
@@ -256,7 +255,7 @@ async with ClientSession(transport) as session:
 | 前缀 | 用途 | 管理者 |
 |---|---|---|
 | `/tagentacle/*` | **系统保留。** Daemon 与 SDK 核心功能 | 核心库 |
-| `/mcp/*` | MCP 协议相关（审计、RPC 隧道） | MCP Transport 层 / Bridge |
+| `/mcp/*` | MCP 发现和网关服务 | MCPServerNode / Gateway |
 
 用户自定义 Topic **不应**使用以上前缀。
 
@@ -267,7 +266,7 @@ async with ClientSession(transport) as session:
 | `/tagentacle/log` | `/rosout` | 全局日志聚合。所有节点通过 SDK 自动发布日志；Daemon 也发布系统事件。 | SDK 节点（自动）+ Daemon |
 | `/tagentacle/node_events` | 生命周期事件 | 节点生命周期事件：上线、下线、状态转换。支撑 Dashboard 实时拓扑图。 | Daemon（自动）+ `LifecycleNode`（自动）|
 | `/tagentacle/diagnostics` | `/diagnostics` | 节点健康诊断：心跳、运行时长、消息计数、错误计数。 | SDK `Node.spin()`（定时）|
-| `/mcp/traffic` | _（无）_ | MCP JSON-RPC 审计流。所有 MCP 隧道流量的镜像，用于无感观测。**（已在 Bridge 中实现）** | Bridge / MCP Transport |
+| `/mcp/directory` | _（无）_ | MCP 服务器发现。`MCPServerDescription` 由 MCP Server Node 和 Gateway 在激活时发布。Agent 订阅后自动发现服务器。 | MCPServerNode / Gateway |
 
 ### 标准 Service（Daemon 内置）
 
@@ -376,7 +375,7 @@ CLI 是开发者的主要交互入口：
 - `tagentacle launch <config.toml>`：根据拓扑配置编排多节点，每个节点独立 venv；自动 `git clone` `[workspace]` 声明的仓库，实现一键工作空间引导。
 - `tagentacle topic echo <topic>`：订阅并实时打印消息。
 - `tagentacle service call <srv> <json>`：从命令行测试服务。
-- `tagentacle bridge --mcp <cmd>`：将外部 MCP Server (stdio) 桥接到总线。
+- ~~`tagentacle bridge`~~：已在 v0.3.0 移除。请使用 `mcp-gateway` 包替代。
 - `tagentacle setup dep --pkg <dir>`：对单个包执行 `uv sync`。
 - `tagentacle setup dep --all <workspace>`：扫描工作空间所有包并安装依赖，生成 `install/` 结构。
 - `tagentacle setup clean --workspace <dir>`：移除生成的 `install/` 目录。
@@ -408,12 +407,14 @@ tagentacle setup clean --workspace .
 - [x] **Rust Daemon**：Topic Pub/Sub 和 Service Req/Res 消息路由。
 - [x] **Python SDK (Simple API)**：`Node` 类，含 `connect`、`publish`、`subscribe`、`service`、`call_service`、`spin`。
 - [x] **Python SDK 双层 API**：实现 `LifecycleNode`，含 `on_configure`/`on_activate`/`on_deactivate`/`on_shutdown`。
-- [x] **MCP Bridge (Rust)**：`tagentacle bridge --mcp` 命令，将 stdio MCP Server 隧道至总线。
-- [x] **MCP Transport 层**：在 `tagentacle-py` 中实现 `TagentacleClientTransport` 和 `TagentacleServerTransport`。
+- [x] ~~**MCP Bridge (Rust)**~~：已在 v0.3.0 移除 — 由 `mcp-gateway`（Python Gateway Node，传输层中继）替代。
+- [x] ~~**MCP Transport 层**~~：已在 python-sdk-mcp v0.2.0 移除 — 由 Streamable HTTP 直连替代。
+- [x] **MCPServerNode 基类**：python-sdk-mcp v0.2.0 — MCP Server Node 基类，自动 Streamable HTTP + `/mcp/directory` 发布。
+- [x] **MCP Gateway**：mcp-gateway v0.1.0 — 传输层 stdio→HTTP 中继 + 目录服务。
 - [x] **Tagentacle MCP Server**：内置 MCP Server，暴露总线交互工具（`publish_to_topic`、`subscribe_topic`、`list_nodes`、`list_topics`、`list_services`、`call_bus_service`、`ping_daemon`、`describe_topic_schema`）。
 - [x] **`tagentacle.toml` 规范**：定义并解析包清单格式。
 - [x] **Bringup 配置中心**：配置驱动的拓扑编排与参数注入。
-- [x] **CLI 工具链**：`daemon`、`run`、`launch`、`topic echo`、`service call`、`doctor`、`bridge`、`setup dep`、`setup clean`。
+- [x] **CLI 工具链**：`daemon`、`run`、`launch`、`topic echo`、`service call`、`doctor`、`setup dep`、`setup clean`。
 - [x] **环境管理**：基于 uv 的逐包 `.venv` 隔离，工作空间 `install/` 结构与符号链接。
 - [x] **秘钥管理**：`secrets.toml` 自动加载，Bringup 环境变量注入。
 - [x] **SDK 工具函数**：`load_pkg_toml`、`discover_packages`、`find_workspace_root`。

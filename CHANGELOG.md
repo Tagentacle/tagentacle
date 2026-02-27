@@ -6,6 +6,14 @@ For Python SDK changes see [`python-sdk-core`](https://github.com/Tagentacle/pyt
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-03-15
+
+### Removed
+- **BREAKING**: Removed `bridge` subcommand (`tagentacle bridge`).
+  - The stdio→HTTP MCP bridging functionality is superseded by [mcp-gateway](https://github.com/Tagentacle/mcp-gateway), a dedicated Python-based Gateway Node with transport-level relay.
+  - Removed `run_bridge()` function (~110 lines) and `Bridge` CLI variant.
+  - Cleaned unused `tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader}` imports.
+
 ## [0.2.0] - 2026-02-26
 
 ### Added
