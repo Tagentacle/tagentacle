@@ -428,6 +428,7 @@ tagentacle setup clean --workspace .
 - [x] **SDK Utilities**: `load_pkg_toml`, `discover_packages`, `find_workspace_root`.
 - [x] **Workspace Repo Auto-Clone**: `[workspace.repos]` in bringup `tagentacle.toml` — `setup dep --all` auto-clones missing git repos.
 - [x] **Example Packages**: `example-agent`, `example-mcp-server`, `example-bringup` as independent repos.
+- [x] **TACL (Tagentacle Access Control Layer)**: `python-sdk-mcp` v0.3.0 — MCP-level JWT authentication with `auth_required` on MCPServerNode, `AuthMCPClient`, `PermissionMCPServerNode` (SQLite agent registry + credential issuer).
 
 ### Planned
 - [ ] **Standard Topics & Services**: Daemon built-in `/tagentacle/log`, `/tagentacle/node_events`, `/tagentacle/diagnostics`, `/tagentacle/ping`, `/tagentacle/list_nodes`, etc.
