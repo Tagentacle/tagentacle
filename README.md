@@ -488,12 +488,45 @@ Admin                   PermissionMCPServerNode           MCPServerNode (auth_re
 - **Zero external dependencies**: JWT signing/verification uses pure Python stdlib (HS256 via `hmac` + `hashlib`).
 - **Shared secret**: Both issuer and verifiers read `TAGENTACLE_AUTH_SECRET` from environment.
 - **Contextvar-based**: `CallerIdentity` is set per-request via Python `contextvars`, enabling tool handlers to read caller info without parameter threading.
-- **Granularity**: Authorization is at the **tool level** per server — not coarse "all or nothing".
+- **Granularity**: Authorization supports **tool-level** per server. However, prefer **server-level** control with small, focused servers (see [Best Practices](#-best-practices)).
 - **Optional**: Auth is opt-in. `MCPServerNode(auth_required=False)` (default) accepts all callers.
 
 ---
 
-## 🐳 Container-Ready Architecture
+## � Best Practices
+
+### TACL: Prefer Server-Level Access Control
+
+TACL supports both **server-level** and **tool-level** authorization via `tool_grants`. However, we recommend using TACL primarily for **server-level control** — i.e., granting or denying an agent access to an entire MCP Server.
+
+If you find yourself needing tool-level ACL within a single server, it's a signal that the server is doing too much. Following the Unix philosophy, split it into smaller, focused MCP Server Pkgs — each doing one thing well. When each server is single-purpose, server-level ACL naturally provides the right granularity.
+
+| Approach | Recommendation | Example |
+|----------|---------------|--------|
+| Server-level | ✅ Recommended | Agent A can access `shell-server` but not `wallet-server` |
+| Tool-level | ⚠️ Possible but not preferred | Agent A can call `exec_command` but not `list_files` on the same server |
+
+**Why?** Smaller servers are easier to reason about, deploy independently, and secure at the perimeter. Tool-level ACL adds complexity inside the server without improving the overall security boundary.
+
+### MCP Server Transport: Streamable HTTP Only
+
+All MCP Server Node Pkgs in Tagentacle use **Streamable HTTP** as their transport. This is required by the `MCPServerNode` base class and enables:
+
+- Direct Agent↔Server sessions with full MCP protocol support (sampling, notifications, resources)
+- TACL JWT authentication via standard HTTP `Authorization` headers
+- Standard health checks, load balancing, and container networking
+
+**stdio MCP Servers are not recommended.** The `mcp-gateway` package provides stdio→HTTP relay as a **legacy compatibility layer** for third-party MCP servers that only support stdio transport. This is analogous to bridging a Linux pipe inside a ROS 2 node — it works, but breaks the standard communication model:
+
+- stdio servers cannot participate in TACL authentication (no HTTP headers)
+- stdio sessions are managed by the Gateway process, not the Agent
+- One subprocess per HTTP session limits scalability
+
+If you control the MCP Server code, always implement it as a Streamable HTTP `MCPServerNode` Pkg.
+
+---
+
+## �🐳 Container-Ready Architecture
 
 Tagentacle's "Everything is a Pkg" philosophy makes it **naturally container-friendly**. Each package is an independent process with its own dependencies — a perfect fit for one-container-per-package deployment.
 
