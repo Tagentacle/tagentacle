@@ -480,10 +480,11 @@ tagentacle setup clean --workspace .
 - [x] **Workspace Repo Auto-Clone**: `[workspace.repos]` in bringup `tagentacle.toml` — `setup dep --all` auto-clones missing git repos.
 - [x] **Example Packages**: `example-agent`, `example-mcp-server`, `example-bringup` as independent repos.
 - [x] **TACL (Tagentacle Access Control Layer)**: `python-sdk-mcp` v0.3.0 — MCP-level JWT authentication with `auth_required` on MCPServerNode, `AuthMCPClient`, `PermissionMCPServerNode` (SQLite agent registry + credential issuer).
+- [x] **Standard Topics & Services**: Daemon built-in `/tagentacle/ping`, `/tagentacle/list_nodes`, `/tagentacle/list_topics`, `/tagentacle/list_services`, `/tagentacle/get_node_info`; `/tagentacle/node_events` auto-published on node connect/disconnect. Daemon registers as `_daemon_` node. Node state fully cleaned up on disconnect.
 
 ### Planned
-- [ ] **Standard Topics & Services**: Daemon built-in `/tagentacle/log`, `/tagentacle/node_events`, `/tagentacle/diagnostics`, `/tagentacle/ping`, `/tagentacle/list_nodes`, etc.
 - [ ] **SDK Log Integration**: Auto-publish node logs to `/tagentacle/log` via `get_logger()`.
+- [ ] **`/tagentacle/log` and `/tagentacle/diagnostics` Topics**: SDK-side auto-publishing of structured log messages and periodic heartbeat/health reports.
 - [ ] **JSON Schema Validation**: Topic-level schema contracts for deterministic message validation.
 - [ ] **Flattened Topic Tools API**: SDK API to auto-generate flattened MCP tools from Topic JSON Schema definitions (e.g., a registered `/chat/input` schema auto-generates a `publish_chat_input(text, sender)` tool with expanded parameters).
 - [ ] **Node Lifecycle Tracking**: Heartbeat/liveliness monitoring in the Daemon via `/tagentacle/diagnostics`.

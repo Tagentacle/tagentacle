@@ -6,6 +6,20 @@ For Python SDK changes see [`python-sdk-core`](https://github.com/Tagentacle/pyt
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Daemon-as-Node (`_daemon_`)**: The Daemon now registers itself as the `_daemon_` node and provides built-in introspection services directly from its internal Router state — no external node required.
+- **Standard Built-in Services**: Five introspection services are now always available once the daemon starts:
+  - `/tagentacle/ping` — health check; returns `{status, uptime_s, version, node_count, topic_count}`
+  - `/tagentacle/list_nodes` — returns all connected nodes with their `connected_at` Unix timestamps
+  - `/tagentacle/list_topics` — returns all active topics and their subscriber lists
+  - `/tagentacle/list_services` — returns all registered services (built-in `_daemon_` services + user-registered)
+  - `/tagentacle/get_node_info` — returns subscriptions, services, and `connected_at` for a specific node
+- **`/tagentacle/node_events` Topic**: The Daemon automatically publishes `connected` / `disconnected` events to this topic whenever a node connects or disconnects. Any node can subscribe to get real-time topology updates.
+- **Node State Cleanup on Disconnect**: When a TCP connection closes, the daemon now removes the node from the node registry, clears its topic subscriptions, and removes its advertised services — preventing stale entries after crashes.
+- **`Router::new()`**: Constructor initializing the router with `start_time` (for uptime) and `node_connected_at` tracking.
+
 ## [0.3.0] - 2026-03-15
 
 ### Removed

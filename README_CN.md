@@ -471,9 +471,12 @@ tagentacle setup clean --workspace .
 - [x] **示例聊天机器人系统**：5 节点完整系统（`example-agent`、`example-inference`、`example-memory`、`example-frontend`、`example-mcp-server`），通过 `example-bringup` 一键启动，端到端验证通过。
 - [x] **示例 Workspace**：`examples/src/` 包含 agent_pkg、mcp_server_pkg、bringup_pkg，均为独立 uv 项目。
 
+- [x] **TACL (Tagentacle 访问控制层)**：python-sdk-mcp v0.3.0 — MCP 级别 JWT 认证，含 MCPServerNode 上的 `auth_required`、`AuthMCPClient`、`PermissionMCPServerNode`（SQLite Agent 注册表 + 凭证颁发器）。
+- [x] **标准 Topic 与 Service（Daemon 内置）**：`/tagentacle/ping`、`/tagentacle/list_nodes`、`/tagentacle/list_topics`、`/tagentacle/list_services`、`/tagentacle/get_node_info`；节点连接/断开时自动发布 `/tagentacle/node_events`；Daemon 注册为 `_daemon_` 节点；节点断开时完整清理状态。
+
 ### 计划中
-- [ ] **标准 Topic 与 Service**：Daemon 内置 `/tagentacle/log`、`/tagentacle/node_events`、`/tagentacle/diagnostics`、`/tagentacle/ping`、`/tagentacle/list_nodes` 等。
 - [ ] **SDK 日志集成**：通过 `get_logger()` 自动发布节点日志到 `/tagentacle/log`。
+- [ ] **`/tagentacle/log` 与 `/tagentacle/diagnostics` Topic**：SDK 侧自动发布结构化日志与周期性心跳健康报告。
 - [ ] **JSON Schema 校验**：Topic 级别 Schema 契约，实现确定性消息校验。
 - [ ] **展平 Topic 工具 API**：SDK 提供 API，根据 Topic JSON Schema 定义自动生成展平参数的 MCP 工具（如注册了 `/chat/input` 的 Schema 后，自动生成 `publish_chat_input(text, sender)` 工具）。
 - [ ] **节点生命周期追踪**：通过 `/tagentacle/diagnostics` 实现 Daemon 侧心跳/存活监控。
